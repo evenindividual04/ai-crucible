@@ -1,0 +1,80 @@
+[project]
+name = "ai-crucible"
+version = "0.1.0"
+description = "An Adversarial Reasoning Engine that stress-tests ideas through structured multi-agent conflict"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "AI Crucible Team"}
+]
+keywords = ["llm", "adversarial", "multi-agent", "system-design", "red-team"]
+
+dependencies = [
+    "langgraph>=0.2.0",
+    "langchain-core>=0.2.0",
+    "langchain-google-genai>=1.0.0",
+    "pydantic>=2.0.0",
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+    "pyyaml>=6.0.0",
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+redis = [
+    "redis>=5.0.0",
+]
+# Alternative LLM providers
+ollama = [
+    "langchain-ollama>=0.1.0",
+]
+groq = [
+    "langchain-groq>=0.1.0",
+]
+openai = [
+    "langchain-openai>=0.1.0",
+]
+anthropic = [
+    "langchain-anthropic>=0.1.0",
+]
+# All providers
+all-providers = [
+    "langchain-ollama>=0.1.0",
+    "langchain-groq>=0.1.0",
+    "langchain-openai>=0.1.0",
+    "langchain-anthropic>=0.1.0",
+]
+
+[project.scripts]
+crucible = "crucible.cli.app:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crucible"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
