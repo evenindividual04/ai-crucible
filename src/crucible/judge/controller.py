@@ -162,7 +162,14 @@ class JudgeController:
             vuln = state.get_vulnerability_by_id(patch.target_vulnerability_id)
             if vuln is None:
                 return False, f"FAILED_INVALID_REFERENCE: Patch references non-existent vulnerability {patch.target_vulnerability_id}"
-        
+            
+            # V2 Check: Validate fix category vs severity
+            if vuln.severity == "CRITICAL" and patch.fix_category == "TACTICAL":
+                logger.warning(
+                    f"Patch {patch.patch_id} uses TACTICAL fix for CRITICAL vulnerability. "
+                    "This is risky but allowed."
+                )
+
         # Check patch count limit
         max_patches = self.config.agents.defender.max_patches_per_iteration
         if len(patches) > max_patches:

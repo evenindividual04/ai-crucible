@@ -6,9 +6,12 @@ following the schema defined in state-schema.md.
 """
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from crucible.token_tracker import TokenBudget
 
 
 class DesignComponent(BaseModel):
@@ -34,17 +37,19 @@ class Vulnerability(BaseModel):
     attack_vector: str
     affected_components: List[int] = Field(default_factory=list)
     iteration_found: int
-
-
-class Patch(BaseModel):
-    """Generated exclusively by the Defender agent."""
     
-    patch_id: int
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    target_vulnerability_id: int
-    fix_description: str
-    design_changes: List[str] = Field(default_factory=list)
-    introduces_new_assumptions: bool = False
+    @property 
+    def confidence_score(self) -> float:
+        """Alias for confidence (backward compatibility)."""
+        return self.confidence
+    
+    @property
+    def is_patched(self) -> bool:
+        """Check if this vulnerability has been patched. Set externally."""
+        return getattr(self, '_is_patched', False)
+
+
+from crucible.patches_v2 import PatchV2 as Patch
 
 
 class IterationSummary(BaseModel):
@@ -77,6 +82,9 @@ class CrucibleState(BaseModel):
     # Iteration Tracking
     iteration_count: int = 0
     max_iterations: int = 3
+    
+    # Active Defender Mode
+    defender_mode: Literal["QUICK_FIX", "ARCHITECT", "COORDINATE"] = "QUICK_FIX"
     
     # ID Allocation (managed by orchestrator)
     next_component_id: int = 1
@@ -113,6 +121,25 @@ class CrucibleState(BaseModel):
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_modified_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # NEW: Token Budget Tracking
+    token_budget: Optional["TokenBudget"] = None
+    
+    # NEW: Checkpoint/Resume Metadata
+    run_id: str = Field(default_factory=lambda: datetime.utcnow().strftime("%Y%m%d_%H%M%S"))
+    checkpoint_enabled: bool = True
+    
+    # NEW: Deduplication Tracking
+    duplicate_count: int = 0
+    merged_vulnerabilities: List[dict] = Field(default_factory=list)
+    
+    # NEW: Validation Tracking
+    rejected_patch_count: int = 0
+    validation_warnings: List[str] = Field(default_factory=list)
+    
+    # NEW: Security Metrics
+    security_scores: List[dict] = Field(default_factory=list)  # List of SecurityScore.to_dict()
+    current_security_score: Optional[dict] = None  # Latest SecurityScore.to_dict()
     
     def allocate_component_id(self) -> int:
         """Allocate a new unique component ID."""

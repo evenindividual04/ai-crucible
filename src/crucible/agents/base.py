@@ -71,7 +71,7 @@ class BaseAgent(ABC, Generic[T]):
                 provider_config = ProviderConfig.for_google(config_model)
             elif provider_name == "ollama":
                 model = config_model if not is_default_model else None
-                provider_config = ProviderConfig.for_ollama(model or "llama3.1:8b")
+                provider_config = ProviderConfig.for_ollama(model or "llama3.1:latest")
             elif provider_name == "groq":
                 model = config_model if not is_default_model else None
                 provider_config = ProviderConfig.for_groq(model or "llama-3.3-70b-versatile")
@@ -261,3 +261,15 @@ class BaseAgent(ABC, Generic[T]):
         
         # Return as-is and let JSON parser handle it
         return content
+
+    async def cleanup(self) -> None:
+        """Explicitly close the LLM client to prevent async warnings."""
+        if self._llm is not None:
+            # Close the async HTTP client if it exists
+            if hasattr(self._llm, "async_client") and self._llm.async_client:
+                try:
+                    await self._llm.async_client.aclose()
+                except Exception:
+                    # Silently ignore cleanup errors
+                    pass
+            self._llm = None

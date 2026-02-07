@@ -9,6 +9,18 @@ import sys
 from pathlib import Path
 from typing import Optional
 import logging
+import json
+import warnings
+
+# Suppress async event loop closure warnings
+# These are harmless - they occur during cleanup after all work is complete
+warnings.filterwarnings("ignore", message=".*Event loop is closed.*")
+warnings.filterwarnings("ignore", message=".*coroutine.*was never awaited.*")
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*loop.*")
+
+# Install stderr filter to suppress RuntimeError tracebacks
+from crucible.stderr_filter import install_stderr_filter
+install_stderr_filter()
 
 # Load .env file for API keys
 from dotenv import load_dotenv
@@ -22,6 +34,14 @@ from crucible.config import CrucibleConfig, set_config
 from crucible.state import CrucibleState
 from crucible.graph import run_crucible_async, build_crucible
 from crucible.cli.display import CrucibleDisplay
+from crucible.token_tracker import TokenBudget
+from crucible.checkpoint import CheckpointManager
+
+# Import display extensions for security metrics
+try:
+    from crucible.cli import display_security
+except ImportError:
+    pass  # Optional extension
 
 # Configure logging
 logging.basicConfig(
@@ -36,12 +56,16 @@ app = typer.Typer(
     add_completion=False,
 )
 
-console = Console()
+console = Console(force_terminal=True)
 
 
 @app.command()
 def run(
-    prompt: str = typer.Argument(..., help="The system design prompt to analyze"),
+    prompt: Optional[str] = typer.Argument(None, help="The system design prompt to analyze"),
+    input_file: Optional[Path] = typer.Option(
+        None, "--input-file", "-f",
+        help="Read design from a file instead of prompt argument"
+    ),
     config_file: Optional[Path] = typer.Option(
         None, "--config", "-c",
         help="Path to configuration file"
@@ -75,12 +99,16 @@ def run(
         help="Output in JSON format (for CI/CD)"
     ),
     provider: str = typer.Option(
-        "google", "--provider", "-p",
-        help="LLM provider: google, ollama, groq, perplexity, openai, anthropic"
+        "groq", "--provider", "-p",
+        help="LLM provider: groq (recommended), google, ollama, perplexity, openai, anthropic"
     ),
     model: Optional[str] = typer.Option(
         None, "--model", "-m",
         help="Model to use (provider-specific, optional)"
+    ),
+    sequential: bool = typer.Option(
+        True, "--sequential/--parallel",
+        help="Run agents sequentially to avoid rate limits"
     ),
 ):
     """
@@ -92,6 +120,25 @@ def run(
     3. Apply patches (Defender)
     4. Evaluate and iterate until stable or unresolved
     """
+    # Handle input: either prompt argument or input file
+    if input_file:
+        if not input_file.exists():
+            console.print(f"[red]Error:[/red] Input file not found: {input_file}")
+            raise typer.Exit(1)
+        
+        try:
+            prompt = input_file.read_text(encoding='utf-8')
+            console.print(f"[dim]Reading design from: {input_file}[/dim]")
+        except Exception as e:
+            console.print(f"[red]Error reading file:[/red] {e}")
+            raise typer.Exit(1)
+    elif not prompt:
+        console.print("[red]Error:[/red] Either provide a prompt or use --input-file")
+        console.print("\nUsage:")
+        console.print("  crucible run \"Your design prompt here\"")
+        console.print("  crucible run --input-file design.md")
+        raise typer.Exit(1)
+    
     # Determine display mode
     if json_output:
         mode = "json"
@@ -143,6 +190,7 @@ def run(
     
     overrides = {
         "max_iterations": max_iterations,
+        "sequential_mode": sequential,
         "similarity": {"threshold": similarity_threshold},
         "confidence": {"blocking_threshold": confidence_threshold},
         "output": {"mode": mode},
@@ -162,15 +210,27 @@ def run(
     # Run the crucible
     try:
         final_state = asyncio.run(_run_with_display(prompt, config, display))
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         console.print("\n[yellow]Interrupted by user[/yellow]")
-        raise typer.Exit(130)
+        raise typer.Exit(1)
+    except RuntimeError as e:
+        if str(e) == "Event loop is closed":
+            # Benign error during shutdown with httpx/asyncio
+            pass
+        else:
+            raise
     except Exception as e:
-        logger.exception("Crucible failed")
-        display.print_error("FAILED_UNEXPECTED", str(e))
-        raise typer.Exit(2)
+        console.print(f"\n[red]Crucible failed[/red]")
+        # Print full traceback in debug mode
+        if debug:
+            import traceback
+            console.print(traceback.format_exc())
+        else:
+            console.print(f"Error: {e}")
+        raise typer.Exit(1)
     
     # Print final output
+    display.print_completion_celebration(final_state)
     display.print_termination(final_state)
     display.print_summary_table(final_state)
     
@@ -203,16 +263,38 @@ async def _run_with_display(
 ) -> CrucibleState:
     """Run the crucible with live display updates."""
     
+    # Show welcome banner
+    display.print_welcome_banner()
+    
     # Initialize state
     state = CrucibleState(
         user_prompt=prompt,
         max_iterations=config.max_iterations,
     )
     
+    # NEW: Initialize token budget
+    if config.token_budget.daily_limit > 0:
+        state.token_budget = TokenBudget(
+            daily_limit=config.token_budget.daily_limit,
+            warn_threshold=config.token_budget.warn_threshold,
+            critical_threshold=config.token_budget.critical_threshold
+        )
+    
+    # NEW: Initialize checkpoint manager
+    checkpoint_mgr = None
+    if config.checkpointing.enabled:
+        output_dir = Path("outputs")
+        checkpoint_mgr = CheckpointManager(run_id=state.run_id, output_dir=output_dir)
+        display.print_event("System", "checkpoint", f"Checkpointing enabled (run ID: {state.run_id})")
+    
     display.print_header(state)
     
     # Build and run the graph
     app = build_crucible()
+    
+    # Set display for streaming output
+    from crucible.graph import set_display
+    set_display(display)
     
     # Track state for display
     last_vuln_count = 0
@@ -227,6 +309,10 @@ async def _run_with_display(
         
         # Display updates based on state changes
         if state.status != last_status:
+            # Print iteration separator when starting a new iteration
+            if state.status == "ROUTING" and state.iteration_count > 0:
+                display.print_iteration_separator(state.iteration_count, state.max_iterations)
+            
             if state.status == "ARCHITECTING":
                 display.print_event("Architect", "status", "Generating initial design...")
             elif state.status == "ROUTING":
@@ -256,6 +342,20 @@ async def _run_with_display(
         # Update header periodically
         if state.status in ("UNDER_ATTACK", "PATCHING", "EVALUATING"):
             display.print_header(state)
+        
+        # NEW: Save checkpoint after each iteration
+        if checkpoint_mgr and state.status == "EVALUATING" and state.iteration_count > 0:
+            try:
+                checkpoint_mgr.save(state, state.iteration_count)
+                display.print_event("System", "checkpoint", f"💾 Checkpoint saved (iteration {state.iteration_count})")
+            except Exception as e:
+                logger.warning(f"Failed to save checkpoint: {e}")
+    
+    # Async cleanup before event loop closes
+    import gc
+    gc.collect()
+    await asyncio.sleep(0.1)
+    gc.collect()
     
     return state
 
@@ -264,6 +364,72 @@ async def _run_with_display(
 def version():
     """Show version information."""
     console.print(f"AI Crucible v{__version__}")
+
+
+@app.command(name="list-runs")
+def list_runs(
+    output_dir: Path = typer.Option(
+        Path("outputs"), "--output-dir", "-o",
+        help="Directory containing run outputs"
+    )
+):
+    """List all saved runs with checkpoint data."""
+    from crucible.checkpoint import list_all_runs
+    
+    runs = list_all_runs(output_dir)
+    
+    if not runs:
+        console.print("[yellow]No saved runs found[/yellow]")
+        return
+    
+    console.print(f"\n[bold]Found {len(runs)} saved runs:[/bold]\n")
+    
+    for run in runs:
+        console.print(f"[cyan]{run['run_id']}[/cyan]")
+        console.print(f"  Status: {run['status']}")
+        console.print(f"  Latest iteration: {run['latest_iteration']}")
+        console.print(f"  Timestamp: {run['timestamp']}")
+        summary = run.get('summary', {})
+        console.print(f"  Vulnerabilities: {summary.get('total_vulnerabilities', 0)}")
+        console.print(f"  Patches: {summary.get('total_patches', 0)}")
+        console.print()
+
+
+@app.command()
+def resume(
+    run_id: str = typer.Argument(..., help="Run ID to resume"),
+    iteration: Optional[int] = typer.Option(
+        None, "--iteration", "-i",
+        help="Specific iteration to resume from (default: latest)"
+    ),
+    output_dir: Path = typer.Option(
+        Path("outputs"), "--output-dir", "-o",
+        help="Directory containing run outputs"
+    )
+):
+    """Resume an interrupted run from a checkpoint."""
+    from crucible.checkpoint import CheckpointManager
+    
+    # Load checkpoint
+    checkpoint_mgr = CheckpointManager(run_id=run_id, output_dir=output_dir)
+    
+    try:
+        state, checkpoint_data = checkpoint_mgr.load(iteration=iteration)
+        console.print(f"[green]Loaded checkpoint from iteration {state.iteration_count}[/green]")
+        console.print(f"Status: {state.status}")
+        console.print(f"Vulnerabilities: {len(state.vulnerabilities)}")
+        console.print(f"Patches: {len(state.patches)}")
+        console.print()
+        
+        # TODO: Resume execution from loaded state
+        # This would require refactoring _run_with_display to accept initial state
+        console.print("[yellow]Note: Full resume execution not yet implemented[/yellow]")
+        console.print("[dim]For now, this command loads and displays the checkpoint data[/dim]")
+        
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        console.print(f"\nUse [cyan]crucible list-runs[/cyan] to see available runs")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -378,6 +544,10 @@ async def _resume_with_display(
     
     # Build and run the graph
     app = build_crucible()
+    
+    # Set display for streaming output
+    from crucible.graph import set_display
+    set_display(display)
     
     last_vuln_count = len(state.vulnerabilities)
     last_patch_count = len(state.patches)

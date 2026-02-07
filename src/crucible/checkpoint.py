@@ -1,13 +1,13 @@
 """
 Checkpoint management for the AI Crucible.
 
-Allows saving and resuming runs from a saved state.
+Allows saving and resuming runs from a saved state with iteration-specific checkpoints.
 """
 
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 import logging
 
 from crucible.state import CrucibleState
@@ -16,84 +16,238 @@ logger = logging.getLogger(__name__)
 
 
 class CheckpointManager:
-    """Manages saving and loading Crucible state checkpoints."""
+    """
+    Manages saving and loading run checkpoints.
     
-    def __init__(self, checkpoint_path: Optional[Path] = None):
-        self.checkpoint_path = checkpoint_path
+    Supports iteration-specific checkpoints and resuming interrupted runs.
+    """
     
-    def save(self, state: CrucibleState, path: Optional[Path] = None) -> Path:
+    def __init__(self, run_id: str, output_dir: Path):
         """
-        Save the current state to a checkpoint file.
+        Initialize checkpoint manager.
         
-        Returns the path where the checkpoint was saved.
+        Args:
+            run_id: Unique identifier for this run
+            output_dir: Base directory for outputs
         """
-        save_path = path or self.checkpoint_path
-        if save_path is None:
-            # Generate a default path
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            save_path = Path(f"crucible_checkpoint_{timestamp}.json")
+        self.run_id = run_id
+        self.output_dir = output_dir
+        self.checkpoint_dir = output_dir / run_id / "checkpoints"
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    
+    def save(
+        self, 
+        state: CrucibleState, 
+        iteration: int,
+        path: Optional[Path] = None,
+        metadata: Optional[dict] = None
+    ) -> Path:
+        """
+        Save a checkpoint for the current iteration.
         
-        # Serialize state to JSON
+        Args:
+            state: Current crucible state
+            iteration: Current iteration number
+            path: Optional specific path (overrides default)
+            metadata: Optional additional metadata to save
+            
+        Returns:
+            Path to saved checkpoint file
+        """
+        if path is None:
+            checkpoint_file = self.checkpoint_dir / f"iter_{iteration}.json"
+        else:
+            checkpoint_file = path
+        
+        # Serialize state
         state_dict = state.model_dump(mode="json")
         
-        # Add checkpoint metadata
         checkpoint_data = {
-            "version": 1,
+            "version": 2,  # Updated version
+            "run_id": self.run_id,
+            "iteration": iteration,
             "saved_at": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now().isoformat(),
             "state": state_dict,
+            "status": state.status,
+            "summary": {
+                "total_vulnerabilities": len(state.vulnerabilities),
+                "total_patches": len(state.patches),
+                "active_vulnerabilities": len(state.active_vulnerabilities),
+                "active_agents": state.active_agents,
+            },
+            "metadata": metadata or {}
         }
         
-        save_path.write_text(json.dumps(checkpoint_data, indent=2, default=str))
-        logger.info(f"Checkpoint saved to: {save_path}")
+        # Save iteration-specific checkpoint
+        with open(checkpoint_file, 'w') as f:
+            json.dump(checkpoint_data, f, indent=2, default=str)
         
-        return save_path
+        # Also save as "latest" for quick resume
+        latest_file = self.checkpoint_dir / "latest.json"
+        with open(latest_file, 'w') as f:
+            json.dump(checkpoint_data, f, indent=2, default=str)
+        
+        logger.info(f"Checkpoint saved to: {checkpoint_file}")
+        
+        return checkpoint_file
     
-    def load(self, path: Optional[Path] = None) -> CrucibleState:
+    def load(
+        self, 
+        iteration: Optional[int] = None,
+        path: Optional[Path] = None
+    ) -> tuple[CrucibleState, dict]:
         """
-        Load a state from a checkpoint file.
+        Load a checkpoint.
         
-        Returns the restored CrucibleState.
+        Args:
+            iteration: Specific iteration to load, or None for latest
+            path: Optional specific path to load from
+            
+        Returns:
+            (CrucibleState, checkpoint_data) tuple
+            
+        Raises:
+            FileNotFoundError: If checkpoint doesn't exist
         """
-        load_path = path or self.checkpoint_path
-        if load_path is None:
-            raise ValueError("No checkpoint path specified")
+        if path is not None:
+            checkpoint_file = path
+        elif iteration is None:
+            checkpoint_file = self.checkpoint_dir / "latest.json"
+        else:
+            checkpoint_file = self.checkpoint_dir / f"iter_{iteration}.json"
         
-        if not load_path.exists():
-            raise FileNotFoundError(f"Checkpoint not found: {load_path}")
+        if not checkpoint_file.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_file}")
         
-        checkpoint_data = json.loads(load_path.read_text())
+        with open(checkpoint_file) as f:
+            data = json.load(f)
         
         # Validate version
-        version = checkpoint_data.get("version", 0)
-        if version != 1:
+        version = data.get("version", 1)
+        if version not in [1, 2]:
             raise ValueError(f"Unsupported checkpoint version: {version}")
         
-        # Restore state
-        state_dict = checkpoint_data["state"]
-        state = CrucibleState(**state_dict)
+        # Reconstruct state
+        state = CrucibleState(**data["state"])
         
-        logger.info(f"Checkpoint loaded from: {load_path}")
+        logger.info(f"Checkpoint loaded from: {checkpoint_file}")
         logger.info(f"Resuming from iteration {state.iteration_count}, status: {state.status}")
         
-        return state
+        return state, data
+    
+    def list_checkpoints(self) -> List[dict]:
+        """
+        List all available checkpoints for this run.
+        
+        Returns:
+            List of checkpoint metadata dictionaries
+        """
+        checkpoints = []
+        
+        for cp_file in sorted(self.checkpoint_dir.glob("iter_*.json")):
+            try:
+                with open(cp_file) as f:
+                    data = json.load(f)
+                    checkpoints.append({
+                        "iteration": data.get("iteration", 0),
+                        "timestamp": data.get("timestamp", data.get("saved_at", "")),
+                        "status": data.get("status", "UNKNOWN"),
+                        "summary": data.get("summary", {}),
+                        "file": str(cp_file)
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to read checkpoint {cp_file}: {e}")
+                continue
+        
+        return checkpoints
+    
+    def delete_checkpoint(self, iteration: int) -> bool:
+        """Delete a specific checkpoint."""
+        checkpoint_file = self.checkpoint_dir / f"iter_{iteration}.json"
+        if checkpoint_file.exists():
+            checkpoint_file.unlink()
+            logger.info(f"Deleted checkpoint for iteration {iteration}")
+            return True
+        return False
+    
+    def cleanup_old_checkpoints(self, keep_last_n: int = 5) -> int:
+        """Delete old checkpoints, keeping only the most recent N."""
+        checkpoints = self.list_checkpoints()
+        
+        if len(checkpoints) <= keep_last_n:
+            return 0
+        
+        to_delete = checkpoints[:-keep_last_n]
+        deleted_count = 0
+        
+        for cp in to_delete:
+            iteration = cp["iteration"]
+            if self.delete_checkpoint(iteration):
+                deleted_count += 1
+        
+        return deleted_count
+    
+    def get_latest_iteration(self) -> Optional[int]:
+        """Get the iteration number of the most recent checkpoint."""
+        checkpoints = self.list_checkpoints()
+        if not checkpoints:
+            return None
+        return checkpoints[-1]["iteration"]
     
     def auto_save(self, state: CrucibleState) -> Optional[Path]:
-        """
-        Auto-save checkpoint after each iteration.
-        
-        Only saves if a checkpoint path is configured.
-        """
-        if self.checkpoint_path is None:
-            return None
-        
-        return self.save(state, self.checkpoint_path)
+        """Auto-save checkpoint after each iteration."""
+        return self.save(state, state.iteration_count)
 
 
+def list_all_runs(output_dir: Path) -> List[dict]:
+    """List all runs with checkpoints in the output directory."""
+    runs = []
+    
+    if not output_dir.exists():
+        return runs
+    
+    for run_dir in output_dir.iterdir():
+        if not run_dir.is_dir():
+            continue
+        
+        checkpoint_dir = run_dir / "checkpoints"
+        if not checkpoint_dir.exists():
+            continue
+        
+        latest_file = checkpoint_dir / "latest.json"
+        if latest_file.exists():
+            try:
+                with open(latest_file) as f:
+                    data = json.load(f)
+                    runs.append({
+                        "run_id": run_dir.name,
+                        "latest_iteration": data.get("iteration", 0),
+                        "timestamp": data.get("timestamp", data.get("saved_at", "")),
+                        "status": data.get("status", "UNKNOWN"),
+                        "summary": data.get("summary", {})
+                    })
+            except Exception:
+                continue
+    
+    return sorted(runs, key=lambda r: r.get("timestamp", ""), reverse=True)
+
+
+# Legacy support
 def save_checkpoint(state: CrucibleState, path: Path) -> Path:
-    """Convenience function to save a checkpoint."""
-    return CheckpointManager().save(state, path)
+    """Convenience function to save a checkpoint (legacy API)."""
+    mgr = CheckpointManager(
+        run_id=getattr(state, 'run_id', 'default'),
+        output_dir=path.parent
+    )
+    return mgr.save(state, state.iteration_count, path=path)
 
 
 def load_checkpoint(path: Path) -> CrucibleState:
-    """Convenience function to load a checkpoint."""
-    return CheckpointManager().load(path)
+    """Convenience function to load a checkpoint (legacy API)."""
+    mgr = CheckpointManager(
+        run_id='default',
+        output_dir=path.parent
+    )
+    state, _ = mgr.load(path=path)
+    return state

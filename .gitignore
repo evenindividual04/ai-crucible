@@ -55,3 +55,11 @@ Thumbs.db
 # ...but allow the public facing ones
 !README.md
 !ARCHITECTURE.md
+
+# Test files and logs
+test_*.py
+list_models.py
+*.log
+
+# Agent directory (Gemini artifacts)
+.agent/

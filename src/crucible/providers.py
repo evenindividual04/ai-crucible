@@ -46,7 +46,7 @@ class ProviderConfig(BaseModel):
         )
     
     @classmethod
-    def for_ollama(cls, model: str = "llama3.1:8b") -> "ProviderConfig":
+    def for_ollama(cls, model: str = "llama3.1:latest") -> "ProviderConfig":
         return cls(
             provider=LLMProvider.OLLAMA,
             model=model,
@@ -221,7 +221,7 @@ def get_default_provider() -> ProviderConfig:
 RECOMMENDED_MODELS = {
     "architect": {
         LLMProvider.GOOGLE: "gemini-2.5-flash",
-        LLMProvider.OLLAMA: "llama3.1:8b",
+        LLMProvider.OLLAMA: "llama3.1:latest",
         LLMProvider.GROQ: "llama-3.3-70b-versatile",
         LLMProvider.PERPLEXITY: "llama-3.1-sonar-large-128k-online",
         LLMProvider.OPENAI: "gpt-4o-mini",
@@ -229,7 +229,7 @@ RECOMMENDED_MODELS = {
     },
     "red_team": {
         LLMProvider.GOOGLE: "gemini-2.5-flash",
-        LLMProvider.OLLAMA: "llama3.1:8b",
+        LLMProvider.OLLAMA: "llama3.1:latest",
         LLMProvider.GROQ: "llama-3.3-70b-versatile",
         LLMProvider.PERPLEXITY: "llama-3.1-sonar-small-128k-online",
         LLMProvider.OPENAI: "gpt-4o-mini",
@@ -237,7 +237,7 @@ RECOMMENDED_MODELS = {
     },
     "defender": {
         LLMProvider.GOOGLE: "gemini-2.5-flash",
-        LLMProvider.OLLAMA: "llama3.1:8b",
+        LLMProvider.OLLAMA: "llama3.1:latest",
         LLMProvider.GROQ: "llama-3.3-70b-versatile",
         LLMProvider.PERPLEXITY: "llama-3.1-sonar-small-128k-online",
         LLMProvider.OPENAI: "gpt-4o-mini",
