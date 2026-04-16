@@ -63,3 +63,14 @@ list_models.py
 
 # Agent directory (Gemini artifacts)
 .agent/
+
+# Frontend (Next.js)
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/.turbo/
+
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/src/__pycache__/

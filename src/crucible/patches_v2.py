@@ -50,6 +50,12 @@ class PatchV2(BaseModel):
     # V2: Fix complexity
     fix_category: FixCategory = FixCategory.TACTICAL
 
+    # Compatibility / wiring fields
+    description: Optional[str] = None               # alias for fix_description (test compatibility)
+    vulnerability_summary: Optional[str] = None
+    affected_components: List[str] = Field(default_factory=list)  # component names (str)
+    defense_justification: Optional["DefenseJustification"] = None
+
 
 class IncrementalPatch(PatchV2):
     """
@@ -82,6 +88,11 @@ class DefenseJustification(BaseModel):
         "MANUAL_CHECK",
         "STATIC_ANALYSIS"
     ] = "CODE_REVIEW"
+
+
+# Resolve forward reference from PatchV2
+PatchV2.model_rebuild()
+IncrementalPatch.model_rebuild()
 
 
 class AttackEffectiveness(BaseModel):

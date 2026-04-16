@@ -7,7 +7,7 @@ Allows agents to reference findings from previous runs for better attacks/defens
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -307,7 +307,7 @@ def record_run_to_memory(
     
     summary = RunSummary(
         run_id=run_id,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         prompt=prompt[:200],
         iterations=iterations,
         final_status=final_status,

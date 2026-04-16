@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypeVar
 import pickle
@@ -69,7 +69,7 @@ class FileCache(CacheBackend):
             
             # Check TTL if present
             if "expires_at" in data and data["expires_at"]:
-                if datetime.utcnow() > data["expires_at"]:
+                if datetime.now(timezone.utc) > data["expires_at"]:
                     self.delete(key)
                     return None
             
@@ -83,8 +83,8 @@ class FileCache(CacheBackend):
         
         data = {
             "value": value,
-            "created_at": datetime.utcnow(),
-            "expires_at": datetime.utcnow() + timedelta(seconds=ttl) if ttl else None,
+            "created_at": datetime.now(timezone.utc),
+            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=ttl) if ttl else None,
         }
         
         try:

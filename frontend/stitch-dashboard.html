@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI Crucible - War Room</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#3c83f6",
+                        "alert-orange": "#F97316",
+                        "background-light": "#f5f7f8",
+                        "background-dark": "#0A0B0F",
+                        "surface-dark": "#12141C",
+                        "border-dark": "#1E232E",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    },
+                    borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+                },
+            },
+        }
+    </script>
+<style>
+        .topology-grid {
+            background-image: radial-gradient(#1E232E 1px, transparent 1px);
+            background-size: 30px 30px;
+        }
+        .radial-progress {
+            background: conic-gradient(#3c83f6 82%, #1E232E 0);
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-200 antialiased overflow-hidden h-screen flex flex-col">
+<!-- Top Navigation Bar -->
+<header class="flex items-center justify-between border-b border-white/5 dark:border-border-dark px-6 py-3 bg-white dark:bg-background-dark">
+<div class="flex items-center gap-4">
+<div class="bg-primary p-1.5 rounded-lg">
+<svg class="size-6 text-white" fill="none" viewbox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+<path d="M42.4379 44C42.4379 44 36.0744 33.9038 41.1692 24C46.8624 12.9336 42.2078 4 42.2078 4L7.01134 4C7.01134 4 11.6577 12.932 5.96912 23.9969C0.876273 33.9029 7.27094 44 7.27094 44L42.4379 44Z" fill="currentColor"></path>
+</svg>
+</div>
+<div>
+<h1 class="text-slate-900 dark:text-white text-lg font-bold leading-tight tracking-tight">AI Crucible <span class="text-slate-400 font-normal mx-2">/</span> War Room</h1>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+<span class="relative flex h-2 w-2">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+</span>
+<span class="text-emerald-500 text-xs font-bold uppercase tracking-wider">Connected</span>
+</div>
+<nav class="hidden lg:flex items-center gap-8">
+<a class="text-primary text-sm font-semibold" href="#">Dashboard</a>
+<a class="text-slate-500 hover:text-white text-sm font-medium transition-colors" href="#">Topology</a>
+<a class="text-slate-500 hover:text-white text-sm font-medium transition-colors" href="#">Logs</a>
+<a class="text-slate-500 hover:text-white text-sm font-medium transition-colors" href="#">Agents</a>
+</nav>
+<div class="flex items-center gap-3 ml-4 border-l border-border-dark pl-6">
+<button class="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<div class="flex items-center gap-3 ml-2">
+<div class="size-8 rounded-full bg-slate-800 border border-border-dark flex items-center justify-center overflow-hidden">
+<img alt="User avatar" data-alt="Cybersecurity analyst professional portrait avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAtMu8qOMc0rmdqg_kuKaaUx-Q94Wx6840oW2MqrLf78pw-c7tQwtY2nNv-_vJ9T2E6kLd8849Utoe9Uuip4rKBoN1IuTu2CSxXRS8GoOJymKrBspYlokmIZBamvM9UOydsBNW6aC35xpMjAx-TRWqr-JRgHjMLEqfYHCPKT6t-9louUTAmmz2WCKOX4W2qa5G6EA6KE6oZOdXtpqftXsLtXZFCTiijtHZ8FZCzQdrcEPjmYclQ2ON0nHIcVtfbrSlOIBheAkhIb_oZ"/>
+</div>
+</div>
+</div>
+</div>
+</header>
+<main class="flex flex-1 overflow-hidden">
+<!-- Sidebar Left: Health & Agents -->
+<aside class="w-80 border-r border-border-dark bg-background-dark/50 flex flex-col overflow-y-auto">
+<div class="p-5 space-y-6">
+<!-- Health Card -->
+<section class="bg-surface-dark rounded-xl p-5 border border-border-dark">
+<h3 class="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4">Security Health</h3>
+<div class="flex items-center justify-between">
+<div class="relative size-24 flex items-center justify-center">
+<div class="absolute inset-0 rounded-full border-4 border-slate-800"></div>
+<div class="absolute inset-0 rounded-full border-4 border-primary border-t-transparent -rotate-45"></div>
+<div class="text-center">
+<span class="text-2xl font-bold text-white block">82</span>
+<span class="text-[10px] text-slate-500 uppercase">Score</span>
+</div>
+</div>
+<div class="space-y-1">
+<div class="text-3xl font-black text-primary italic">A-</div>
+<div class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 text-[10px] font-bold uppercase w-fit">Risk: Low</div>
+</div>
+</div>
+<div class="mt-6 pt-4 border-t border-border-dark space-y-3">
+<div class="flex justify-between text-xs">
+<span class="text-slate-400">Policy Compliance</span>
+<span class="text-white mono">94%</span>
+</div>
+<div class="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-emerald-500" style="width: 94%"></div>
+</div>
+</div>
+</section>
+<!-- Active Agents List -->
+<section>
+<div class="flex items-center justify-between mb-4">
+<h3 class="text-slate-400 text-xs font-bold uppercase tracking-widest">Active Agents</h3>
+<span class="px-2 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-bold">16 LIVE</span>
+</div>
+<div class="space-y-4">
+<!-- Category: Red Team -->
+<div>
+<div class="flex items-center gap-2 text-alert-orange mb-2">
+<span class="material-symbols-outlined text-sm">target</span>
+<span class="text-[11px] font-bold uppercase">Red Team (4)</span>
+</div>
+<div class="space-y-2">
+<div class="flex items-center justify-between bg-white/5 p-2 rounded-lg border border-white/5">
+<div class="flex items-center gap-2">
+<div class="size-1.5 rounded-full bg-emerald-500"></div>
+<span class="text-xs font-medium text-slate-200 mono">rt-pentest-01</span>
+</div>
+<span class="text-[10px] text-slate-500 italic">Injecting...</span>
+</div>
+<div class="flex items-center justify-between bg-white/5 p-2 rounded-lg border border-white/5">
+<div class="flex items-center gap-2">
+<div class="size-1.5 rounded-full bg-emerald-500"></div>
+<span class="text-xs font-medium text-slate-200 mono">rt-scan-alpha</span>
+</div>
+<span class="text-[10px] text-slate-500 italic">Scanning</span>
+</div>
+</div>
+</div>
+<!-- Category: Defenders -->
+<div>
+<div class="flex items-center gap-2 text-primary mb-2">
+<span class="material-symbols-outlined text-sm">shield</span>
+<span class="text-[11px] font-bold uppercase">Defenders (12)</span>
+</div>
+<div class="space-y-2">
+<div class="flex items-center justify-between bg-white/5 p-2 rounded-lg border border-white/5">
+<div class="flex items-center gap-2">
+<div class="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+<span class="text-xs font-medium text-slate-200 mono">guard-prompt-01</span>
+</div>
+<div class="flex items-center gap-1">
+<div class="h-3 w-1 bg-primary/30 rounded-full"></div>
+<div class="h-4 w-1 bg-primary/30 rounded-full"></div>
+<div class="h-2 w-1 bg-primary rounded-full"></div>
+<div class="h-3 w-1 bg-primary rounded-full"></div>
+</div>
+</div>
+<div class="flex items-center justify-between bg-white/5 p-2 rounded-lg border border-white/5">
+<div class="flex items-center gap-2">
+<div class="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+<span class="text-xs font-medium text-slate-200 mono">sentinel-api-gateway</span>
+</div>
+<div class="flex items-center gap-1">
+<div class="h-2 w-1 bg-primary rounded-full"></div>
+<div class="h-3 w-1 bg-primary rounded-full"></div>
+<div class="h-1 w-1 bg-primary/30 rounded-full"></div>
+<div class="h-2 w-1 bg-primary rounded-full"></div>
+</div>
+</div>
+<div class="flex items-center justify-between bg-white/5 p-2 rounded-lg border border-white/5 opacity-60">
+<div class="flex items-center gap-2">
+<div class="size-1.5 rounded-full bg-slate-600"></div>
+<span class="text-xs font-medium text-slate-400 mono">vector-monitor-x</span>
+</div>
+<span class="text-[10px] text-slate-600">Idle</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Sidebar Bottom: System Info -->
+<div class="mt-auto border-t border-border-dark p-5 bg-background-dark">
+<div class="flex items-center justify-between mb-2">
+<span class="text-[10px] text-slate-500 uppercase tracking-tighter">System Clock (UTC)</span>
+<span class="text-xs mono text-primary">14:28:03</span>
+</div>
+<div class="flex items-center justify-between">
+<span class="text-[10px] text-slate-500 uppercase tracking-tighter">Environment</span>
+<span class="text-xs text-white">PROD-NORTH-01</span>
+</div>
+</div>
+</aside>
+<!-- Center: Topology Visualizer -->
+<section class="flex-1 flex flex-col bg-background-dark relative overflow-hidden">
+<!-- Topology Toolbar -->
+<div class="absolute top-4 left-4 z-10 flex gap-2">
+<div class="flex bg-surface-dark/80 backdrop-blur-md border border-border-dark p-1 rounded-lg">
+<button class="p-2 hover:bg-white/5 rounded text-slate-400 transition-all"><span class="material-symbols-outlined text-[20px]">zoom_in</span></button>
+<button class="p-2 hover:bg-white/5 rounded text-slate-400 transition-all"><span class="material-symbols-outlined text-[20px]">zoom_out</span></button>
+<div class="w-px h-4 bg-border-dark my-auto mx-1"></div>
+<button class="p-2 hover:bg-white/5 rounded text-slate-400 transition-all"><span class="material-symbols-outlined text-[20px]">refresh</span></button>
+</div>
+<div class="flex bg-surface-dark/80 backdrop-blur-md border border-border-dark p-1 rounded-lg">
+<button class="px-3 py-1.5 bg-primary/20 text-primary text-[11px] font-bold rounded">2D VIEW</button>
+<button class="px-3 py-1.5 hover:bg-white/5 text-slate-400 text-[11px] font-bold rounded">3D CLOUD</button>
+</div>
+</div>
+<div class="absolute top-4 right-4 z-10">
+<div class="bg-surface-dark/80 backdrop-blur-md border border-border-dark px-4 py-2 rounded-lg">
+<div class="flex items-center gap-4 text-[10px] font-bold tracking-widest uppercase">
+<div class="flex items-center gap-1.5"><div class="size-2 rounded-full bg-emerald-500"></div> Safe</div>
+<div class="flex items-center gap-1.5"><div class="size-2 rounded-full bg-yellow-400"></div> Warning</div>
+<div class="flex items-center gap-1.5"><div class="size-2 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]"></div> Breach</div>
+</div>
+</div>
+</div>
+<!-- Network Topology Canvas Area -->
+<div class="w-full h-full topology-grid relative cursor-grab active:cursor-grabbing">
+<!-- Mock Connection Lines (SVG) -->
+<svg class="absolute inset-0 w-full h-full pointer-events-none opacity-40">
+<path d="M 200 400 L 400 300" fill="none" stroke="#1E232E" stroke-width="2"></path>
+<path d="M 400 300 L 600 250" fill="none" stroke="#F97316" stroke-dasharray="4" stroke-width="2"></path>
+<path d="M 400 300 L 600 450" fill="none" stroke="#3c83f6" stroke-width="2"></path>
+<path d="M 600 250 L 800 300" fill="none" stroke="#1E232E" stroke-width="2"></path>
+<path d="M 600 450 L 800 300" fill="none" stroke="#3c83f6" stroke-width="2"></path>
+</svg>
+<!-- Topology Nodes -->
+<!-- LLM Gateway (Safe) -->
+<div class="absolute left-[150px] top-[370px] group">
+<div class="size-14 bg-surface-dark border-2 border-emerald-500 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.2)] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-emerald-500">router</span>
+</div>
+<div class="mt-2 text-center">
+<p class="text-[10px] font-bold mono text-white">LLM-GW-01</p>
+<p class="text-[9px] text-slate-500">Gateway</p>
+</div>
+</div>
+<!-- Main Processor (Warning/Critical) -->
+<div class="absolute left-[360px] top-[260px] group">
+<div class="size-20 bg-surface-dark border-2 border-alert-orange rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(249,115,22,0.3)] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-alert-orange text-3xl">psychology</span>
+</div>
+<div class="mt-2 text-center">
+<p class="text-xs font-bold mono text-white">GPT-Analysis-Node</p>
+<p class="text-[10px] text-alert-orange font-bold animate-pulse">THREAT DETECTED</p>
+</div>
+<!-- Small indicator badge -->
+<div class="absolute -top-2 -right-2 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full border-2 border-background-dark">
+                        3
+                    </div>
+</div>
+<!-- Vector DB (Safe) -->
+<div class="absolute left-[580px] top-[210px] group">
+<div class="size-16 bg-surface-dark border border-border-dark rounded-xl flex items-center justify-center group-hover:border-primary transition-all">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary">database</span>
+</div>
+<div class="mt-2 text-center">
+<p class="text-[10px] font-bold mono text-white">VECT-DB-ALPHA</p>
+<p class="text-[9px] text-slate-500">1.2ms latency</p>
+</div>
+</div>
+<!-- Prompt Filter (Active/Safe) -->
+<div class="absolute left-[580px] top-[430px] group">
+<div class="size-14 bg-surface-dark border-2 border-primary rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(60,131,246,0.2)] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-primary">filter_alt</span>
+</div>
+<div class="mt-2 text-center">
+<p class="text-[10px] font-bold mono text-white">PROMPT-SENTRY</p>
+<p class="text-[9px] text-primary">Active Protection</p>
+</div>
+</div>
+<!-- External API (Warning) -->
+<div class="absolute left-[780px] top-[280px] group">
+<div class="size-14 bg-surface-dark border border-yellow-400 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(250,204,21,0.1)] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-yellow-400">api</span>
+</div>
+<div class="mt-2 text-center">
+<p class="text-[10px] font-bold mono text-white">USER-FACING-API</p>
+<p class="text-[9px] text-yellow-400">High Traffic</p>
+</div>
+</div>
+</div>
+<!-- Bottom Detail Pane -->
+<div class="h-48 border-t border-border-dark bg-surface-dark/90 backdrop-blur-xl p-4 overflow-hidden">
+<div class="flex items-center justify-between mb-4">
+<h4 class="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">terminal</span>
+                        Node Events Timeline
+                    </h4>
+<button class="text-primary text-[11px] font-bold hover:underline">EXPORT CSV</button>
+</div>
+<div class="space-y-1.5 h-[calc(100%-2rem)] overflow-y-auto pr-2">
+<div class="flex gap-4 py-1 border-b border-white/5 last:border-0 hover:bg-white/5 px-2 rounded transition-colors group">
+<span class="text-[11px] mono text-slate-600 group-hover:text-slate-400 transition-colors shrink-0">14:27:55.122</span>
+<span class="text-[11px] mono text-alert-orange shrink-0">[WARN]</span>
+<span class="text-[11px] text-slate-300">Unusual semantic density detected in prompt payload at node <span class="text-primary mono">GPT-Analysis-Node</span></span>
+</div>
+<div class="flex gap-4 py-1 border-b border-white/5 last:border-0 hover:bg-white/5 px-2 rounded transition-colors group">
+<span class="text-[11px] mono text-slate-600 group-hover:text-slate-400 transition-colors shrink-0">14:27:42.008</span>
+<span class="text-[11px] mono text-emerald-500 shrink-0">[INFO]</span>
+<span class="text-[11px] text-slate-300">Successfully filtered potentially malicious PII from session <span class="text-primary mono">sess_a821x...</span></span>
+</div>
+<div class="flex gap-4 py-1 border-b border-white/5 last:border-0 hover:bg-white/5 px-2 rounded transition-colors group">
+<span class="text-[11px] mono text-slate-600 group-hover:text-slate-400 transition-colors shrink-0">14:27:30.455</span>
+<span class="text-[11px] mono text-red-500 shrink-0">[CRIT]</span>
+<span class="text-[11px] text-slate-300">Attempted jailbreak pattern "DAN 6.0" identified and blocked by <span class="text-primary mono">PROMPT-SENTRY</span></span>
+</div>
+</div>
+</div>
+</section>
+<!-- Sidebar Right: Vulnerability Feed -->
+<aside class="w-80 border-l border-border-dark bg-background-dark/50 flex flex-col">
+<div class="p-5 flex flex-col h-full">
+<div class="flex items-center justify-between mb-6">
+<h3 class="text-slate-400 text-xs font-bold uppercase tracking-widest">Vulnerability Feed</h3>
+<div class="flex items-center gap-2">
+<div class="size-2 rounded-full bg-red-500"></div>
+<span class="text-xs font-black mono">3</span>
+</div>
+</div>
+<div class="space-y-4 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+<!-- Critical Issue -->
+<div class="bg-surface-dark border-l-4 border-alert-orange p-4 rounded-r-lg hover:bg-white/[0.08] transition-all cursor-pointer group">
+<div class="flex items-center justify-between mb-2">
+<span class="px-2 py-0.5 rounded text-[10px] font-black bg-alert-orange/10 text-alert-orange uppercase tracking-tighter">Critical</span>
+<span class="text-[10px] text-slate-600 mono">2m ago</span>
+</div>
+<h4 class="text-xs font-bold text-white mb-2 leading-tight">Prompt Injection Attempt</h4>
+<p class="text-[11px] text-slate-400 leading-relaxed">Sophisticated jailbreak payload detected bypassing level 1 filters. Origin: 192.168.1.44</p>
+<div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
+<span class="text-[10px] text-primary mono">Node: GPT-Node-04</span>
+<span class="material-symbols-outlined text-slate-500 text-sm group-hover:translate-x-1 transition-transform">arrow_forward</span>
+</div>
+</div>
+<!-- Medium Issue -->
+<div class="bg-surface-dark border-l-4 border-yellow-500 p-4 rounded-r-lg hover:bg-white/[0.08] transition-all cursor-pointer">
+<div class="flex items-center justify-between mb-2">
+<span class="px-2 py-0.5 rounded text-[10px] font-black bg-yellow-500/10 text-yellow-500 uppercase tracking-tighter">Medium</span>
+<span class="text-[10px] text-slate-600 mono">14m ago</span>
+</div>
+<h4 class="text-xs font-bold text-white mb-2 leading-tight">PII Leakage Warning</h4>
+<p class="text-[11px] text-slate-400 leading-relaxed">Model output contained patterns resembling social security numbers. Endpoint: /v1/chat/completions</p>
+<div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
+<span class="text-[10px] text-primary mono">Endpoint: API-Edge</span>
+</div>
+</div>
+<!-- Low Issue -->
+<div class="bg-surface-dark border-l-4 border-slate-600 p-4 rounded-r-lg hover:bg-white/[0.08] transition-all cursor-pointer">
+<div class="flex items-center justify-between mb-2">
+<span class="px-2 py-0.5 rounded text-[10px] font-black bg-slate-600/20 text-slate-400 uppercase tracking-tighter">Low</span>
+<span class="text-[10px] text-slate-600 mono">1h ago</span>
+</div>
+<h4 class="text-xs font-bold text-white mb-2 leading-tight">Latency Spike</h4>
+<p class="text-[11px] text-slate-400 leading-relaxed">Vector database retrieval time increased by 140% during batch processing.</p>
+<div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
+<span class="text-[10px] text-primary mono">Node: Vect-DB-01</span>
+</div>
+</div>
+</div>
+<div class="mt-6">
+<button class="w-full py-2.5 rounded-lg bg-primary text-white text-xs font-bold hover:bg-blue-600 transition-colors shadow-lg shadow-primary/20">
+                        GENERATE REPORT
+                    </button>
+</div>
+</div>
+</aside>
+</main>
+<!-- Footer Status Bar -->
+<footer class="h-10 border-t border-border-dark bg-background-dark/80 backdrop-blur-md flex items-center px-6 justify-between text-[10px] uppercase font-bold tracking-widest">
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2 text-slate-500">
+<span class="material-symbols-outlined text-xs">database</span>
+                SYNCED: 100%
+            </div>
+<div class="flex items-center gap-2 text-slate-500">
+<span class="material-symbols-outlined text-xs">speed</span>
+                AVG LATENCY: 22ms
+            </div>
+</div>
+<div class="flex items-center gap-4">
+<span class="text-slate-500">Session ID: <span class="text-primary mono">C-0822-CRUCIBLE-X</span></span>
+<div class="h-3 w-px bg-border-dark"></div>
+<span class="text-emerald-500">System Nominal</span>
+</div>
+</footer>
+</body></html>

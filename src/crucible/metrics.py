@@ -5,7 +5,7 @@ Tracks API calls, tokens, and timing for cost estimation.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 import time
 
@@ -28,7 +28,7 @@ class APICallMetric:
 class RunMetrics:
     """Aggregated metrics for a Crucible run."""
     
-    start_time: datetime = field(default_factory=datetime.utcnow)
+    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     end_time: Optional[datetime] = None
     api_calls: List[APICallMetric] = field(default_factory=list)
     
@@ -49,7 +49,7 @@ class RunMetrics:
         self.api_calls.append(APICallMetric(
             agent=agent,
             model=model,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             duration_ms=duration_ms,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -59,7 +59,7 @@ class RunMetrics:
     
     def finish(self) -> None:
         """Mark the run as finished."""
-        self.end_time = datetime.utcnow()
+        self.end_time = datetime.now(timezone.utc)
     
     @property
     def total_api_calls(self) -> int:
@@ -94,7 +94,7 @@ class RunMetrics:
     @property
     def total_duration_seconds(self) -> float:
         """Total run duration in seconds."""
-        end = self.end_time or datetime.utcnow()
+        end = self.end_time or datetime.now(timezone.utc)
         return (end - self.start_time).total_seconds()
     
     @property

@@ -13,6 +13,7 @@ from langgraph.graph import StateGraph, END
 from pydantic import BaseModel
 
 from crucible.config import get_config, CrucibleConfig
+from crucible.eval.schemas import AgentType
 from crucible.state import (
     CrucibleState,
     DesignComponent,
@@ -43,6 +44,9 @@ logger = logging.getLogger(__name__)
 # Global display object for streaming output
 _display = None
 
+# Global tracer for evaluation
+_tracer = None
+
 def set_display(display):
     """Set the global display object for streaming output."""
     global _display
@@ -51,6 +55,149 @@ def set_display(display):
 def get_display():
     """Get the global display object."""
     return _display
+
+
+def register_tracer(tracer):
+    """Register a tracer for instrumentation."""
+    global _tracer
+    _tracer = tracer
+
+
+def get_tracer():
+    """Get the registered tracer, if any."""
+    return _tracer
+
+
+def _resolve_agent_type(agent_name: str) -> AgentType:
+    """Map an agent name to a trace agent type."""
+    return {
+        "Architect": AgentType.ARCHITECT,
+        "SecurityHawk": AgentType.SECURITY_HAWK,
+        "ScaleMonster": AgentType.SCALE_MONSTER,
+        "CostAnalyst": AgentType.COST_ANALYST,
+        "LogicBreaker": AgentType.LOGIC_BREAKER,
+        "ComplianceAgent": AgentType.COMPLIANCE,
+        "UXAdversary": AgentType.UX_ADVERSARY,
+        "ChaosEngineer": AgentType.CHAOS_ENGINEER,
+        "Defender": AgentType.DEFENDER,
+        "QuickFixer": AgentType.DEFENDER,
+        "ArchitectRefactorer": AgentType.DEFENDER,
+        "DefenseCoordinator": AgentType.DEFENDER,
+    }.get(agent_name, AgentType.DEFENDER)
+
+
+def _trace_iteration_start(state: CrucibleState) -> None:
+    tracer = get_tracer()
+    if tracer:
+        tracer.iteration_start(state)
+
+
+def _trace_iteration_end(state: CrucibleState) -> None:
+    tracer = get_tracer()
+    if tracer:
+        tracer.iteration_end(state)
+
+
+def _trace_agent_invoke(
+    agent_type: AgentType | str,
+    agent_name: str,
+    input_prompt: str | None = None,
+) -> None:
+    tracer = get_tracer()
+    if tracer:
+        tracer.agent_invoke(agent_type, agent_name, input_prompt=input_prompt)
+
+
+def _trace_agent_complete(
+    agent_type: AgentType | str,
+    agent_name: str,
+    *,
+    success: bool = True,
+    vulnerabilities_found: int = 0,
+    tokens_used: int = 0,
+    duration_ms: float | None = None,
+    error_message: str | None = None,
+) -> None:
+    tracer = get_tracer()
+    if tracer:
+        tracer.agent_complete(
+            agent_type=agent_type,
+            agent_name=agent_name,
+            success=success,
+            vulnerabilities_found=vulnerabilities_found,
+            tokens_used=tokens_used,
+            duration_ms=duration_ms,
+            error_message=error_message,
+        )
+
+
+def _trace_design_validated(is_valid: bool, reason: str | None, components_count: int) -> None:
+    tracer = get_tracer()
+    if tracer:
+        tracer.design_validated(
+            is_valid=is_valid,
+            reason=reason,
+            components_count=components_count,
+        )
+
+
+def _trace_vulnerability_found(vuln: Vulnerability) -> None:
+    tracer = get_tracer()
+    if tracer:
+        tracer.vulnerability_found(
+            vulnerability_id=vuln.vulnerability_id,
+            title=vuln.title,
+            severity=vuln.severity,
+            domain=vuln.domain,
+            confidence=vuln.confidence,
+            agent_type=_resolve_agent_type(vuln.agent_name or "Defender"),
+        )
+
+
+def _trace_vulnerability_duplicate(
+    new_vuln: Vulnerability,
+    original_vuln: Vulnerability,
+    similarity_score: float,
+) -> None:
+    tracer = get_tracer()
+    if tracer:
+        tracer.vulnerability_duplicate(
+            vulnerability_id=new_vuln.vulnerability_id,
+            original_id=original_vuln.vulnerability_id,
+            similarity_score=similarity_score,
+        )
+
+
+def _trace_patch_applied(patch: Patch) -> None:
+    tracer = get_tracer()
+    if tracer:
+        tracer.patch_applied(
+            patch_id=patch.patch_id,
+            target_vulnerability_id=patch.target_vulnerability_id,
+            validated=True,
+            introduces_new_assumptions=patch.introduces_new_assumptions,
+        )
+
+
+def _trace_patch_rejected(patch: Patch, rejection_reason: str) -> None:
+    tracer = get_tracer()
+    if tracer:
+        tracer.patch_rejected(
+            patch_id=patch.patch_id,
+            target_vulnerability_id=patch.target_vulnerability_id,
+            rejection_reason=rejection_reason,
+        )
+
+
+def _trace_judge_decision(decision, vulnerabilities_count: int, patches_count: int, security_score: float) -> None:
+    tracer = get_tracer()
+    if tracer:
+        tracer.judge_decision(
+            decision=decision,
+            vulnerabilities_count=vulnerabilities_count,
+            patches_count=patches_count,
+            security_score=security_score,
+        )
 
 
 def cleanup_agent_sync(agent):
@@ -101,7 +248,15 @@ def architect_node(state: CrucibleState) -> Dict[str, Any]:
     
     try:
         agent = ArchitectAgent()
+        _trace_agent_invoke("Architect", "ArchitectAgent", input_prompt=state.user_prompt)
         output = agent.invoke(user_prompt=state.user_prompt)
+
+        _trace_agent_complete(
+            "Architect",
+            "ArchitectAgent",
+            success=True,
+            vulnerabilities_found=0,
+        )
         
         if display:
             display.clear_agent_activity()
@@ -125,6 +280,12 @@ def architect_node(state: CrucibleState) -> Dict[str, Any]:
         }
         
     except AgentTimeoutError as e:
+        _trace_agent_complete(
+            "Architect",
+            "ArchitectAgent",
+            success=False,
+            error_message=str(e),
+        )
         logger.error(f"Architect timeout: {e}")
         if display:
             display.clear_agent_activity()
@@ -134,6 +295,12 @@ def architect_node(state: CrucibleState) -> Dict[str, Any]:
             "termination_reason": str(e),
         }
     except AgentSchemaError as e:
+        _trace_agent_complete(
+            "Architect",
+            "ArchitectAgent",
+            success=False,
+            error_message=str(e),
+        )
         logger.error(f"Architect schema error: {e}")
         if display:
             display.clear_agent_activity()
@@ -143,6 +310,12 @@ def architect_node(state: CrucibleState) -> Dict[str, Any]:
             "termination_reason": str(e),
         }
     except Exception as e:
+        _trace_agent_complete(
+            "Architect",
+            "ArchitectAgent",
+            success=False,
+            error_message=str(e),
+        )
         logger.error(f"Architect error: {e}")
         if display:
             display.clear_agent_activity()
@@ -176,6 +349,7 @@ def validate_design_node(state: CrucibleState) -> Dict[str, Any]:
     
     judge = JudgeController()
     is_valid, reason = judge.validate_design(state)
+    _trace_design_validated(is_valid, reason, len(state.design_components))
     
     if not is_valid:
         logger.error(f"Design validation failed: {reason}")
@@ -201,8 +375,10 @@ async def _run_single_red_team_agent(
         return agent_name, [], f"Unknown agent: {agent_name}"
     
     agent = None
+    agent_type = _resolve_agent_type(agent_name)
     try:
         agent = agent_class()
+        _trace_agent_invoke(agent_type, agent_name)
         
         # Show agent activity if display is provided
         if display:
@@ -217,17 +393,42 @@ async def _run_single_red_team_agent(
         # Clear activity line
         if display:
             display.clear_agent_activity()
+
+        _trace_agent_complete(
+            agent_type,
+            agent_name,
+            success=True,
+            vulnerabilities_found=len(output.vulnerabilities),
+        )
         
         return agent_name, output.vulnerabilities, None
     except AgentTimeoutError as e:
+        _trace_agent_complete(
+            agent_type,
+            agent_name,
+            success=False,
+            error_message=str(e),
+        )
         if display:
             display.clear_agent_activity()
         return agent_name, [], f"Timeout: {e}"
     except AgentSchemaError as e:
+        _trace_agent_complete(
+            agent_type,
+            agent_name,
+            success=False,
+            error_message=str(e),
+        )
         if display:
             display.clear_agent_activity()
         return agent_name, [], f"Schema error: {e}"
     except Exception as e:
+        _trace_agent_complete(
+            agent_type,
+            agent_name,
+            success=False,
+            error_message=str(e),
+        )
         if display:
             display.clear_agent_activity()
         return agent_name, [], f"Error: {e}"
@@ -245,6 +446,7 @@ def red_team_node(state: CrucibleState) -> Dict[str, Any]:
     config = get_config()
     display = get_display()
     logger.info(f"Red Team attacking with agents: {state.active_agents}")
+    _trace_iteration_start(state)
     
     # NEW: Smart batching based on token budget
     sequential = config.sequential_mode
@@ -337,8 +539,10 @@ def red_team_node(state: CrucibleState) -> Dict[str, Any]:
                 attack_vector=vuln_data.get("attack_vector", ""),
                 affected_components=vuln_data.get("affected_components", []),
                 iteration_found=state.iteration_count,
+                agent_name=agent_name,
             )
             all_vulns.append(vuln)
+            _trace_vulnerability_found(vuln)
     
     if not all_vulns:
         logger.warning("No vulnerabilities found by any agent")
@@ -352,6 +556,9 @@ def red_team_node(state: CrucibleState) -> Dict[str, Any]:
             all_vulns,
             state.vulnerabilities
         )
+
+        for duplicate_vuln, original_vuln, similarity_score in duplicates:
+            _trace_vulnerability_duplicate(duplicate_vuln, original_vuln, similarity_score)
         
         if duplicates and display:
             display.print_event("System", "deduplication",
@@ -406,6 +613,7 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
         QuickFixer, ArchitectRefactorer, DefenseCoordinator
     )
     
+    config = get_config()
     display = get_display()
     agents_to_cleanup = []
     
@@ -433,10 +641,17 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
             
             agent = QuickFixer()
             agents_to_cleanup.append(agent)
+            _trace_agent_invoke("Defender", "QuickFixer")
             output = agent.invoke(
                 design_markdown=state.design_markdown,
                 components=state.design_components,
                 vulnerabilities=active_vulns,
+            )
+            _trace_agent_complete(
+                "Defender",
+                "QuickFixer",
+                success=True,
+                vulnerabilities_found=0,
             )
             raw_patches = output.patches
             updated_design = output.updated_design_markdown
@@ -451,10 +666,17 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
             
             agent = ArchitectRefactorer()
             agents_to_cleanup.append(agent)
+            _trace_agent_invoke("Defender", "ArchitectRefactorer")
             output = agent.invoke(
                 design_markdown=state.design_markdown,
                 components=state.design_components,
                 vulnerabilities=active_vulns,
+            )
+            _trace_agent_complete(
+                "Defender",
+                "ArchitectRefactorer",
+                success=True,
+                vulnerabilities_found=0,
             )
             raw_patches = output.patches
             updated_design = output.updated_design_markdown
@@ -470,18 +692,50 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
              # But here we treat it as a final validation step implicitly
              pass
 
-        # 3. Convert patches using PatchV2
+        # 3. Convert patches using PatchV2 / IncrementalPatch
+        from crucible.patches_v2 import IncrementalPatch, DefenseJustification
         for p_data in raw_patches:
-            patch = Patch(
+            target_vid = p_data.get("target_vulnerability_id", 0)
+            fix_category = p_data.get("fix_category", "TACTICAL")
+            target_vuln = next((v for v in active_vulns if v.vulnerability_id == target_vid), None)
+            is_partial = (
+                target_vuln is not None
+                and target_vuln.severity in ("CRITICAL", "HIGH")
+                and fix_category == "TACTICAL"
+            )
+
+            base_kwargs = dict(
                 patch_id=state.allocate_patch_id(),
-                target_vulnerability_id=p_data.get("target_vulnerability_id", 0),
+                target_vulnerability_id=target_vid,
                 fix_description=p_data.get("fix_description", ""),
                 design_changes=p_data.get("design_changes", []),
                 introduces_new_assumptions=p_data.get("introduces_new_assumptions", False),
-                # V2 Fields
-                patch_confidence="HIGH", # Default for now
-                fix_category=p_data.get("fix_category", "TACTICAL"),
+                patch_confidence="HIGH",
+                fix_category=fix_category,
                 trade_offs=p_data.get("trade_offs"),
+            )
+
+            if is_partial:
+                severity_after = "HIGH" if target_vuln.severity == "CRITICAL" else "MEDIUM"
+                patch = IncrementalPatch(
+                    **base_kwargs,
+                    full_fix=False,
+                    severity_before=target_vuln.severity,
+                    severity_after=severity_after,
+                    remaining_risk=(
+                        f"Tactical fix reduces severity from {target_vuln.severity} to {severity_after}; "
+                        "architectural fix still needed"
+                    ),
+                )
+            else:
+                patch = Patch(**base_kwargs)
+
+            # Auto-generate DefenseJustification (Fix 6)
+            patch.defense_justification = DefenseJustification(
+                patch_id=patch.patch_id,
+                attack_vector_addressed=target_vuln.attack_vector if target_vuln else "Unknown",
+                mechanism=patch.fix_description,
+                verification_method="CODE_REVIEW" if fix_category == "TACTICAL" else "INTEGRATION_TEST",
             )
             patches.append(patch)
 
@@ -493,10 +747,17 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
             
             coord_agent = DefenseCoordinator()
             agents_to_cleanup.append(coord_agent)
+            _trace_agent_invoke("Defender", "DefenseCoordinator")
             coord_out = coord_agent.invoke(
                 design_markdown=state.design_markdown,
-                patches=[p.dict() for p in patches],
+                patches=[p.model_dump() for p in patches],
                 vulnerabilities=active_vulns
+            )
+            _trace_agent_complete(
+                "Defender",
+                "DefenseCoordinator",
+                success=True,
+                vulnerabilities_found=0,
             )
             
             if display:
@@ -524,6 +785,7 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
                 result = validation_results[patch.patch_id]
                 if result["valid"]:
                     valid_patches.append(patch)
+                    _trace_patch_applied(patch)
                     # Log warnings if any
                     if result["warnings"] and display:
                         for warning in result["warnings"]:
@@ -531,6 +793,7 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
                 else:
                     # Patch failed validation
                     state.rejected_patch_count += 1
+                    _trace_patch_rejected(patch, "; ".join(result["errors"]))
                     if display:
                         for error in result["errors"]:
                             display.print_event("Validator", "error", f"❌ Patch #{patch.patch_id} rejected: {error}")
@@ -585,51 +848,133 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
             cleanup_agent_sync(agent)
 
 
+def _calculate_terminal_metrics(state: CrucibleState) -> None:
+    """Calculate v2 analytics at the end of a run (mutates state in place)."""
+    from crucible.patches_v2 import (
+        calculate_attack_effectiveness,
+        calculate_convergence_metrics,
+        DefenseQuality,
+        IncrementalPatch,
+    )
+    display = get_display()
+
+    # Per-agent attack effectiveness
+    patched_ids = {p.target_vulnerability_id for p in state.patches}
+    vulns_as_dicts = [
+        {"agent": v.agent_name, "vulnerability_id": v.vulnerability_id}
+        for v in state.vulnerabilities
+    ]
+    effectiveness_rows = []
+    for agent_name in state.active_agents:
+        eff = calculate_attack_effectiveness(agent_name, vulns_as_dicts, list(patched_ids))
+        row = {
+            "agent": eff.agent,
+            "total_attacks": eff.total_attacks,
+            "accepted_attacks": eff.accepted_attacks,
+            "patched_attacks": eff.patched_attacks,
+            "effectiveness_ratio": eff.effectiveness_ratio,
+            "impact_ratio": eff.impact_ratio,
+        }
+        effectiveness_rows.append(row)
+    state.attack_effectiveness = effectiveness_rows
+
+    # Defense quality
+    partial = sum(1 for p in state.patches if isinstance(p, IncrementalPatch) and not p.full_fix)
+    full = len(state.patches) - partial
+    dq = DefenseQuality(
+        total_patches=len(state.patches),
+        regression_count=0,
+        full_fix_count=full,
+        partial_fix_count=partial,
+    )
+    state.defense_quality = {
+        "total_patches": dq.total_patches,
+        "regression_count": dq.regression_count,
+        "full_fix_count": dq.full_fix_count,
+        "partial_fix_count": dq.partial_fix_count,
+        "regression_rate": dq.regression_rate,
+        "first_time_fix_rate": dq.first_time_fix_rate,
+    }
+
+    # Convergence metrics
+    initial_critical = (
+        state.iteration_summaries[0].critical_remaining if state.iteration_summaries else 0
+    )
+    cm = calculate_convergence_metrics(
+        state.iteration_count, initial_critical, state.get_unpatched_critical_count()
+    )
+    state.convergence_metrics = {
+        "iterations_completed": cm.iterations_completed,
+        "critical_at_start": cm.critical_at_start,
+        "critical_at_end": cm.critical_at_end,
+        "vulnerability_reduction_rate": cm.vulnerability_reduction_rate,
+    }
+
+    # Display summary table
+    if display and effectiveness_rows:
+        display.print_event("Analytics", "metrics", "=== Run Analytics ===")
+        for row in effectiveness_rows:
+            if row["total_attacks"] > 0:
+                display.print_event(
+                    "Analytics", "agent",
+                    f"{row['agent']}: {row['total_attacks']} attacks, "
+                    f"{row['patched_attacks']} patched "
+                    f"({row['impact_ratio']:.0%} impact)",
+                )
+        display.print_event(
+            "Analytics", "defense",
+            f"Defense: {full} full fixes, {partial} partial fixes",
+        )
+        display.print_event(
+            "Analytics", "convergence",
+            f"Convergence: {cm.iterations_completed} iterations, "
+            f"{cm.critical_at_start}→{cm.critical_at_end} criticals "
+            f"({cm.vulnerability_reduction_rate:.0%} reduced)",
+        )
+
+
 def evaluate_node(state: CrucibleState) -> Dict[str, Any]:
     """Judge evaluates and decides termination."""
     logger.info("Judge evaluating iteration...")
     
     judge = JudgeController()
     decision = judge.decide_termination(state)
+    from crucible.security_metrics import SecurityScorer
+
+    scorer = SecurityScorer()
+    security_score = scorer.calculate_overall_score(state)
+
+    state.security_scores.append(security_score.to_dict())
+    state.current_security_score = security_score.to_dict()
+
+    display = get_display()
+    if display:
+        improvement = None
+        if len(state.security_scores) > 1:
+            prev_score = state.security_scores[-2]["overall_score"]
+            improvement = security_score.overall_score - prev_score
+
+        display.print_security_score(security_score, improvement)
+
+    _trace_judge_decision(
+        decision.decision,
+        vulnerabilities_count=len(state.vulnerabilities),
+        patches_count=len(state.patches),
+        security_score=security_score.overall_score,
+    )
+    _trace_iteration_end(state)
     
-    if decision.decision == "TERMINATE_STABLE":
+    if decision.decision in ("TERMINATE_STABLE", "TERMINATE_UNRESOLVED", "TERMINATE_FAILED"):
+        _calculate_terminal_metrics(state)
+        status = decision.decision.replace("TERMINATE_", "")
         return {
-            "status": "STABLE",
+            "status": status,
             "termination_reason": decision.reason,
-        }
-    elif decision.decision == "TERMINATE_UNRESOLVED":
-        return {
-            "status": "UNRESOLVED",
-            "termination_reason": decision.reason,
-        }
-    elif decision.decision == "TERMINATE_FAILED":
-        return {
-            "status": "FAILED",
-            "termination_reason": decision.reason,
+            "attack_effectiveness": state.attack_effectiveness,
+            "defense_quality": state.defense_quality,
+            "convergence_metrics": state.convergence_metrics,
         }
     else:
-        # Continue to next iteration
-        # NEW: Calculate security score after each iteration
-        from crucible.security_metrics import SecurityScorer
-        
-        scorer = SecurityScorer()
-        security_score = scorer.calculate_overall_score(state)
-        
-        # Track scores over time
-        state.security_scores.append(security_score.to_dict())
-        state.current_security_score = security_score.to_dict()
-        
-        # Display security score
-        display = get_display()
-        if display:
-            # Calculate improvement if we have previous scores
-            improvement = None
-            if len(state.security_scores) > 1:
-                prev_score = state.security_scores[-2]["overall_score"]
-                improvement = security_score.overall_score - prev_score
-            
-            display.print_security_score(security_score, improvement)
-        
         return {"status": "ROUTING"}
 
 

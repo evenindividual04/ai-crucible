@@ -102,16 +102,14 @@ class PatchValidator:
         """
         # Build set of valid component names
         component_names = {c.name for c in design_components}
-        
-        # Extract components from design_changes (PatchV2 field)
-        # design_changes is a list of strings describing changes
-        # For now, just check that design_changes references valid component names
-        if hasattr(patch, 'design_changes'):
-            all_changes = ' '.join(patch.design_changes)
-            # Check if any component names appear in the changes
-            # This is a basic check - could be improved
-            return True, None  # Skip detailed validation for now
-        
+
+        # Check affected_components against known component names
+        affected = getattr(patch, 'affected_components', [])
+        if affected:
+            unknown = [c for c in affected if c not in component_names]
+            if unknown:
+                return False, f"Patch references unknown components: {', '.join(unknown)}"
+
         return True, None
     
     def check_regression(

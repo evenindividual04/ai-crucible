@@ -5,7 +5,7 @@ Allows saving and resuming runs from a saved state with iteration-specific check
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List
 import logging
@@ -66,8 +66,8 @@ class CheckpointManager:
             "version": 2,  # Updated version
             "run_id": self.run_id,
             "iteration": iteration,
-            "saved_at": datetime.utcnow().isoformat(),
-            "timestamp": datetime.now().isoformat(),
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "state": state_dict,
             "status": state.status,
             "summary": {

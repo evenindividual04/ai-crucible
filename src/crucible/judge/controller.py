@@ -9,7 +9,7 @@ The Judge is the deterministic decision-maker that:
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Literal, Optional
 import logging
 
@@ -109,7 +109,7 @@ class JudgeController:
             decision = JudgeDecision(
                 decision="CONTINUE_TO_DEFEND",
                 reason=f"Found {len(novel_criticals)} novel critical vulnerabilities",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 iteration=state.iteration_count,
                 novel_critical_count=len(novel_criticals),
                 total_critical_count=total_criticals,
@@ -120,7 +120,7 @@ class JudgeController:
             decision = JudgeDecision(
                 decision="CONTINUE_TO_DEFEND",
                 reason=f"Found {len(novel)} novel vulnerabilities (no blocking criticals)",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 iteration=state.iteration_count,
                 novel_critical_count=0,
                 total_critical_count=total_criticals,
@@ -131,7 +131,7 @@ class JudgeController:
             decision = JudgeDecision(
                 decision="TERMINATE_STABLE",
                 reason="No novel vulnerabilities found",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 iteration=state.iteration_count,
                 novel_critical_count=0,
                 total_critical_count=0,
@@ -216,7 +216,7 @@ class JudgeController:
                 decision = JudgeDecision(
                     decision="TERMINATE_UNRESOLVED",
                     reason=f"Iteration cap reached ({max_iter}) with {unpatched_criticals} unpatched critical vulnerabilities",
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     iteration=iteration,
                     novel_critical_count=0,
                     total_critical_count=unpatched_criticals,
@@ -225,7 +225,7 @@ class JudgeController:
                 decision = JudgeDecision(
                     decision="TERMINATE_STABLE",
                     reason=f"Iteration cap reached ({max_iter}) with all criticals patched",
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     iteration=iteration,
                 )
             
@@ -239,7 +239,7 @@ class JudgeController:
             decision = JudgeDecision(
                 decision="CONTINUE_TO_ATTACK",
                 reason=f"Continuing: {unpatched_criticals} unpatched critical vulnerabilities remain",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 iteration=iteration,
                 total_critical_count=unpatched_criticals,
             )
@@ -247,7 +247,7 @@ class JudgeController:
             decision = JudgeDecision(
                 decision="TERMINATE_STABLE",
                 reason="All critical vulnerabilities have been patched",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 iteration=iteration,
             )
         

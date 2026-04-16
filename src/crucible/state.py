@@ -5,13 +5,12 @@ This module defines the core data structures used throughout the system,
 following the schema defined in state-schema.md.
 """
 
-from datetime import datetime
-from typing import List, Literal, Optional, TYPE_CHECKING
+from datetime import datetime, timezone
+from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    from crucible.token_tracker import TokenBudget
+from crucible.token_tracker import TokenBudget
 
 
 class DesignComponent(BaseModel):
@@ -37,8 +36,9 @@ class Vulnerability(BaseModel):
     attack_vector: str
     affected_components: List[int] = Field(default_factory=list)
     iteration_found: int
-    
-    @property 
+    agent_name: Optional[str] = None  # Which red team agent found this
+
+    @property
     def confidence_score(self) -> float:
         """Alias for confidence (backward compatibility)."""
         return self.confidence
@@ -65,10 +65,11 @@ class IterationSummary(BaseModel):
 class CrucibleState(BaseModel):
     """
     The single source of truth for all data flowing through the system.
-    
+
     This is the main state object passed through the LangGraph nodes.
     """
-    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     # Schema Version (for future migrations)
     schema_version: int = 1
     
@@ -119,14 +120,14 @@ class CrucibleState(BaseModel):
     error_code: Optional[str] = None
     
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_modified_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_modified_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     # NEW: Token Budget Tracking
-    token_budget: Optional["TokenBudget"] = None
+    token_budget: Optional[TokenBudget] = None
     
     # NEW: Checkpoint/Resume Metadata
-    run_id: str = Field(default_factory=lambda: datetime.utcnow().strftime("%Y%m%d_%H%M%S"))
+    run_id: str = Field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"))
     checkpoint_enabled: bool = True
     
     # NEW: Deduplication Tracking
@@ -140,6 +141,11 @@ class CrucibleState(BaseModel):
     # NEW: Security Metrics
     security_scores: List[dict] = Field(default_factory=list)  # List of SecurityScore.to_dict()
     current_security_score: Optional[dict] = None  # Latest SecurityScore.to_dict()
+
+    # NEW: V2 Analytics
+    attack_effectiveness: List[dict] = Field(default_factory=list)  # per-agent effectiveness metrics
+    defense_quality: Optional[dict] = None
+    convergence_metrics: Optional[dict] = None
     
     def allocate_component_id(self) -> int:
         """Allocate a new unique component ID."""
@@ -171,16 +177,20 @@ class CrucibleState(BaseModel):
         return [v for v in self.vulnerabilities if v.vulnerability_id in self.active_vulnerabilities]
     
     def get_unpatched_critical_count(self) -> int:
-        """Count CRITICAL vulnerabilities that haven't been patched."""
-        patched_ids = {p.target_vulnerability_id for p in self.patches}
+        """Count CRITICAL vulnerabilities without a full (non-incremental) patch."""
+        from crucible.patches_v2 import IncrementalPatch as IncPatch
+        fully_patched_ids = {
+            p.target_vulnerability_id for p in self.patches
+            if not (isinstance(p, IncPatch) and not p.full_fix)
+        }
         return sum(
             1 for v in self.vulnerabilities
-            if v.severity == "CRITICAL" and v.vulnerability_id not in patched_ids
+            if v.severity == "CRITICAL" and v.vulnerability_id not in fully_patched_ids
         )
     
     def touch(self) -> None:
         """Update the last_modified_at timestamp."""
-        self.last_modified_at = datetime.utcnow()
+        self.last_modified_at = datetime.now(timezone.utc)
 
 
 # Type aliases for clarity

@@ -219,7 +219,7 @@ class VulnerabilityDeduplicator:
             merged.severity = other.severity
         
         # Use higher confidence
-        merged.confidence_score = max(merged.confidence_score, other.confidence_score)
+        merged.confidence = max(merged.confidence, other.confidence)
         
         return merged
     

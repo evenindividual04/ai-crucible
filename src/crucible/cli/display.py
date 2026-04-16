@@ -4,7 +4,7 @@ Rich-based display for the AI Crucible CLI.
 Implements the visual specification from cli-spec.md.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 import json
 
@@ -74,7 +74,7 @@ class CrucibleDisplay:
     ):
         self.mode = mode
         self.console = console or Console()
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(timezone.utc)
         self.events: List[dict] = []
         self.progress = None
         self.current_spinner = None
@@ -86,7 +86,7 @@ class CrucibleDisplay:
     
     def _get_relative_time(self) -> str:
         """Get time relative to start."""
-        delta = datetime.utcnow() - self.start_time
+        delta = datetime.now(timezone.utc) - self.start_time
         return f"+{delta.total_seconds():.1f}s"
     
     def print_header(self, state: CrucibleState) -> None:
@@ -108,7 +108,7 @@ class CrucibleDisplay:
         title.append("ADVERSARIAL ENGINE", style="cyan")
         
         status_style = STATUS_COLORS.get(state.status, "white")
-        elapsed = (datetime.utcnow() - self.start_time).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - self.start_time).total_seconds()
         
         # Create info with metrics
         info = Text()
@@ -141,7 +141,7 @@ class CrucibleDisplay:
         timestamp = self._get_relative_time()
         
         event = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "agent": agent,
             "event_type": event_type,
             "content": content,
@@ -255,7 +255,7 @@ class CrucibleDisplay:
         if self.mode == "json":
             event = {
                 "event": "termination",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "state": state.status,
                 "reason": state.termination_reason,
             }
@@ -358,7 +358,7 @@ class CrucibleDisplay:
         if self.mode == "json":
             event = {
                 "event": "error",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "error_code": error_code,
                 "message": message,
             }
