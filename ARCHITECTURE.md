@@ -4,6 +4,12 @@
 
 The **AI Crucible** is not a chatbot. It is a **deterministic adversarial reasoning engine** built on [LangGraph](https://langchain-ai.github.io/langgraph/). It orchestrates a conflict between "Red Team" (Attacker) and "Blue Team" (Defender) agents to harden system designs before a single line of code is written.
 
+The repository is a monorepo with three execution surfaces:
+
+1. **Core engine** (`src/crucible/`): LangGraph state machine, agents, judge, scoring, tracing, and CLI.
+2. **Backend** (`backend/`): FastAPI + WebSocket API for dashboard streaming.
+3. **Frontend** (`frontend/`): Next.js war-room dashboard consuming typed simulation events.
+
 ---
 
 ## 🧠 System Overview
@@ -68,9 +74,13 @@ Agents run in parallel (or sequentially if configured) to identify specific cate
 | **Scale Monster** | `SCALABILITY` | Bottlenecks, race conditions, resource exhaustion, thundering herds. |
 | **Cost Analyst** | `COST` | "Wallet-denial-of-service", expensive API loops, storage amplification. |
 | **Logic Breaker** | `LOGIC` | State machine deadlocks, invalid transitions, distributed consensus failures. |
+| **Compliance Agent** | `REGULATORY` | Control coverage gaps, standards mismatch, governance weaknesses. |
+| **UX Adversary** | `USABILITY` | Unsafe defaults, user confusion paths, human-factor exploitation. |
+| **Chaos Engineer** | `RELIABILITY` | Failure injection paths, recovery blind spots, resilience assumptions. |
 
 ### 4. Defender Node
 *   **Role**: Proposes minimal patches to fix specific vulnerabilities.
+*   **Implementation**: Tactical (`QuickFixer`), strategic (`ArchitectRefactorer`), and coordination (`DefenseCoordinator`) flow.
 *   **Constraint**: Can only apply up to **3 patches** per iteration. This prevents "hallucinated refactors" where an agent claims to rewrite the whole system. The Defender must prioritize.
 
 ### 5. The Judge (Governance Overlay)
@@ -105,18 +115,44 @@ class CrucibleState(BaseModel):
 
 ---
 
+## 📈 Evaluation and Tracing Architecture
+
+The evaluation subsystem adds observability and benchmarkability to the control loop.
+
+### Trace Capture
+
+* `CrucibleTracer` records structured events (agent invoke/complete, vulnerability found/duplicate, judge decision, iteration start/end).
+* Traces are emitted to JSONL and a final JSON artifact for later analysis.
+* Tracing is opt-in via CLI flags: `--enable-tracing` and `--trace-output`.
+
+### Evaluation Pipeline
+
+* **Criteria**: attack effectiveness, convergence speed, redundancy, token efficiency.
+* **Aggregation**: weighted average, min, max, product, custom formulas.
+* **Reporters**: JSON, Markdown, HTML output formats.
+* **Batch evaluation**: compare and summarize multiple saved runs.
+
+### CLI Integration
+
+* `crucible eval <run_id>` evaluates a specific run.
+* `crucible bench` performs batch evaluation over saved runs.
+
+---
+
 ## 🛠️ Technology Stack
 
 *   **Orchestration**: [LangGraph](https://github.com/langchain-ai/langgraph)
 *   **LLM Interface**: [LangChain](https://github.com/langchain-ai/langchain)
 *   **Validation**: [Pydantic](https://docs.pydantic.dev/) for strict schema enforcement.
 *   **Embeddings**: `sentence-transformers` for semantic deduplication.
-*   **CLI**: `Typer` and `Rich` for the "War Room" interface.
+*   **CLI**: `Typer` and `Rich` for the terminal "War Room" interface.
+*   **Backend API**: FastAPI + WebSockets.
+*   **Frontend**: Next.js + React + TypeScript + Tailwind + ReactFlow.
 
 ---
 
 ## 🔮 Future Roadmap
 
 *   **Docker Sandbox**: Allow Red Team agents to execute real code exploits in minimal containers.
-*   **Graph Visualization**: Real-time browser-based rendering of the state machine.
+*   **Live Engine-to-Dashboard Stream**: Replace remaining mock event paths with full core-engine event stream.
 *   **Human-in-the-Loop**: Interactive breakpoints where a human operator can guide the Defender.

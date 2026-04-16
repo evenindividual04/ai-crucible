@@ -48,7 +48,7 @@ Crucible embraces this principle: **if a vulnerability exists, we'll find it**. 
 
 ### 🔴 Multi-Agent Red Team
 
-**4 Specialized Attack Agents** run in parallel:
+**7 Specialized Attack Agents** run in parallel:
 
 | Agent | Domain | Attack Surface |
 |-------|--------|----------------|
@@ -56,6 +56,9 @@ Crucible embraces this principle: **if a vulnerability exists, we'll find it**. 
 | 🦖 **Scale Monster** | Performance | Bottlenecks, resource exhaustion, cascading failures |
 | 💸 **Cost Analyst** | Economics | Wallet-DoS, runaway costs, inefficient algorithms |
 | 🧩 **Logic Breaker** | Correctness | Race conditions, state bugs, edge cases |
+| 📋 **Compliance Agent** | Regulatory | OWASP/CWE mapping gaps, policy and control weaknesses |
+| 🧑‍💻 **UX Adversary** | Usability | User-flow abuse paths, confusion vectors, unsafe defaults |
+| 🌪️ **Chaos Engineer** | Reliability | Failure injection, recovery blind spots, resilience weaknesses |
 
 **Smart Batching**: Automatically adjusts parallelism (6 → 3 → 1) based on token budget.
 
@@ -115,7 +118,7 @@ The **Judge** is deterministic logic, not an LLM:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/ai-crucible.git
+git clone https://github.com/evenindividual04/ai-crucible.git
 cd ai-crucible
 
 # Create virtual environment
@@ -144,6 +147,22 @@ export GOOGLE_API_KEY="your-api-key-here"  # For Google Gemini
 crucible run "Build a secure user authentication system with JWT tokens" \
   --max-iterations 3 \
   --provider google
+```
+
+### Run the Dashboard (Backend + Frontend)
+
+```bash
+./start-dashboard.sh
+```
+
+Or run services separately:
+
+```bash
+# Backend
+cd backend && uvicorn src.server:app --host 0.0.0.0 --port 8000 --reload
+
+# Frontend
+cd frontend && npm run dev
 ```
 
 **Expected Output:**
@@ -215,6 +234,21 @@ crucible list-runs
 
 # Resume interrupted run
 crucible resume 20260207_183042 --iteration 2
+```
+
+### Evaluation & Tracing
+
+```bash
+# Enable execution tracing while running a simulation
+crucible run "Design a secure auth system" \
+  --enable-tracing \
+  --trace-output evals/logs/traces.jsonl
+
+# Evaluate a run by run ID
+crucible eval <run_id>
+
+# Batch evaluate saved runs
+crucible bench
 ```
 
 ### Configuration File
@@ -301,7 +335,7 @@ graph TB
 | **CLI** | Typer + Rich (beautiful terminal UI) |
 | **Config** | YAML + Pydantic validation |
 | **Persistence** | JSON checkpoints |
-| **Testing** | pytest (23/23 tests passing) |
+| **Testing** | pytest (core + eval suites) |
 
 ---
 
@@ -373,8 +407,11 @@ score = max(0, min(100, score))
 # All tests
 pytest
 
-# Specific module
-pytest tests/test_security_metrics.py -v
+# Eval-focused tests
+pytest tests/test_eval -v
+
+# Integration and tracing checks
+pytest tests/test_integration.py tests/test_graph_tracing.py -v
 
 # Coverage report
 pytest --cov=crucible --cov-report=html
@@ -384,21 +421,24 @@ pytest --cov=crucible --cov-report=html
 
 ```
 ai-crucible/
+├── backend/             # FastAPI + WebSocket server
+├── frontend/            # Next.js war-room dashboard
 ├── src/crucible/
 │   ├── agents/          # Red Team & Defender agents
 │   ├── cli/             # Typer CLI + Rich display
+│   ├── eval/            # Tracing, criteria, evaluators, reporters
+│   ├── judge/           # Judge controller and helpers
 │   ├── checkpoint.py    # Progress persistence
 │   ├── compliance.py    # OWASP/CWE mapping
 │   ├── config.py        # Configuration management
 │   ├── deduplication.py # Vulnerability filtering
 │   ├── graph.py         # LangGraph orchestration
-│   ├── judge.py         # Termination logic
 │   ├── security_metrics.py # Scoring algorithms
 │   ├── state.py         # State schema
 │   ├── token_tracker.py # Budget management
 │   └── validation.py    # Patch validation
 ├── tests/               # Comprehensive test suite
-├── docs/                # Architecture docs
+├── evals/               # Trace/evaluation outputs
 └── crucible.yaml        # Config template
 ```
 
@@ -477,7 +517,8 @@ crucible run "Healthcare API with PHI data" --output-design final.md
 ### Planned Features
 
 - [ ] **Automated Patch Application** - Apply fixes to actual codebases
-- [ ] **Real-time Dashboard** - WebSocket streaming UI
+- [x] **Real-time Dashboard** - Backend + frontend scaffolding with WebSocket streaming
+- [ ] **Production Dashboard Integration** - Replace mock stream with full live simulation stream
 - [ ] **Multi-Model Validation** - Cross-check with 2-3 LLMs
 - [ ] **CI/CD Integration** - GitHub Actions, Jenkins plugins
 - [ ] **Git Integration** - Commit patches as PRs
