@@ -314,3 +314,46 @@ class PatchValidator:
         )
         
         return results
+
+
+def validate_scenario_manifest(manifest_path) -> List['ScenarioPackRef']:
+    """
+    Validate and load scenario manifest from JSON file.
+    
+    Args:
+        manifest_path: Path to scenario manifest JSON file
+        
+    Returns:
+        List of validated ScenarioPackRef objects
+        
+    Raises:
+        FileNotFoundError: If manifest file does not exist
+        json.JSONDecodeError: If manifest is not valid JSON
+        ValidationError: If scenarios do not match schema
+    """
+    import json
+    from pathlib import Path
+    from crucible.state import ScenarioPackRef
+    from pydantic import ValidationError
+    
+    manifest_path = Path(manifest_path)
+    
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Scenario manifest not found: {manifest_path}")
+    
+    with open(manifest_path) as f:
+        data = json.load(f)
+    
+    if "scenarios" not in data:
+        raise ValueError("Manifest must contain 'scenarios' key")
+    
+    scenarios = []
+    for scenario_data in data["scenarios"]:
+        try:
+            scenario = ScenarioPackRef(**scenario_data)
+            scenarios.append(scenario)
+        except ValidationError:
+            raise  # Re-raise Pydantic's ValidationError as-is
+    
+    logger.info(f"Loaded {len(scenarios)} scenarios from {manifest_path}")
+    return scenarios

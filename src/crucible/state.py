@@ -13,6 +13,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from crucible.token_tracker import TokenBudget
 
 
+class ScenarioPackRef(BaseModel):
+    """Reference to a scenario pack and specific case within it."""
+    
+    pack_id: str
+    case_id: str
+    version: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+
+
 class DesignComponent(BaseModel):
     """Represents a machine-readable unit of the proposed system."""
     
@@ -75,6 +84,9 @@ class CrucibleState(BaseModel):
     
     # User Input
     user_prompt: str
+    
+    # Scenario Pack Reference (optional)
+    scenario_pack_ref: Optional[ScenarioPackRef] = None
     
     # Design Representation
     design_markdown: str = ""  # Human-readable
