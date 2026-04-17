@@ -689,67 +689,6 @@ output:
     console.print(f"[green]Created config file:[/green] {config_path}")
 
 
-@app.command()
-def resume(
-    checkpoint: Path = typer.Argument(..., help="Path to checkpoint file to resume from"),
-    output_design: Optional[Path] = typer.Option(
-        None, "--output-design", "-o",
-        help="Save final design to a markdown file"
-    ),
-    debug: bool = typer.Option(
-        False, "--debug", "-d",
-        help="Enable debug mode"
-    ),
-):
-    """Resume a run from a checkpoint file."""
-    from crucible.checkpoint import load_checkpoint
-    
-    if not checkpoint.exists():
-        console.print(f"[red]Checkpoint file not found:[/red] {checkpoint}")
-        raise typer.Exit(1)
-    
-    try:
-        state = load_checkpoint(checkpoint)
-    except Exception as e:
-        console.print(f"[red]Failed to load checkpoint:[/red] {e}")
-        raise typer.Exit(1)
-    
-    console.print(f"[green]Resuming from checkpoint:[/green] {checkpoint}")
-    console.print(f"  Iteration: {state.iteration_count}/{state.max_iterations}")
-    console.print(f"  Status: {state.status}")
-    console.print(f"  Vulnerabilities: {len(state.vulnerabilities)}")
-    console.print(f"  Patches: {len(state.patches)}")
-    
-    # Set up display
-    mode = "debug" if debug else "war_room"
-    display = CrucibleDisplay(mode=mode, console=console)
-    
-    # Load config and continue
-    config = CrucibleConfig.load()
-    set_config(config)
-    
-    try:
-        final_state = asyncio.run(_resume_with_display(state, config, display))
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted by user[/yellow]")
-        raise typer.Exit(130)
-    except Exception as e:
-        logger.exception("Crucible resume failed")
-        display.print_error("FAILED_UNEXPECTED", str(e))
-        raise typer.Exit(2)
-    
-    # Print final output
-    display.print_termination(final_state)
-    display.print_summary_table(final_state)
-    
-    if output_design:
-        output_design.write_text(final_state.design_markdown)
-        console.print(f"\n[green]Final design saved to:[/green] {output_design}")
-    
-    exit_code = {"STABLE": 0, "UNRESOLVED": 1, "FAILED": 2}.get(final_state.status, 2)
-    raise typer.Exit(exit_code)
-
-
 async def _resume_with_display(
     state: CrucibleState,
     config: CrucibleConfig,

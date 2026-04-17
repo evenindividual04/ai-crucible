@@ -63,6 +63,31 @@ class AgentsConfig(BaseModel):
     red_team: RedTeamConfig = Field(default_factory=RedTeamConfig)
 
 
+class ScenariosConfig(BaseModel):
+    """Configuration for scenario packs and benchmark mode."""
+    
+    enabled: bool = False
+
+
+class AttackChainsConfig(BaseModel):
+    """Configuration for attack chain reasoning."""
+    
+    enabled: bool = False
+
+
+class DefenderStrategySemConfig(BaseModel):
+    """Configuration for defender strategy simulation."""
+    
+    enabled: bool = False
+
+
+class BenchmarksConfig(BaseModel):
+    """Configuration for benchmark execution and gating."""
+    
+    enabled: bool = False
+    fail_on_regression: bool = False
+
+
 class LLMConfig(BaseModel):
     """Configuration for LLM providers."""
     
@@ -92,6 +117,10 @@ class CrucibleConfig(BaseModel):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    scenarios: ScenariosConfig = Field(default_factory=ScenariosConfig)
+    attack_chains: AttackChainsConfig = Field(default_factory=AttackChainsConfig)
+    defender_strategy_sim: DefenderStrategySemConfig = Field(default_factory=DefenderStrategySemConfig)
+    benchmarks: BenchmarksConfig = Field(default_factory=BenchmarksConfig)
     
     @classmethod
     def load(
