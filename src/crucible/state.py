@@ -22,6 +22,29 @@ class ScenarioPackRef(BaseModel):
     tags: List[str] = Field(default_factory=list)
 
 
+class AttackChainStep(BaseModel):
+    """Represents one step in an attack chain (prerequisite fulfilled)."""
+    
+    vulnerability_id: int
+    step_number: int
+    description: str
+    attack_progression: str  # How this step enables the next
+    confidence: float = Field(ge=0.0, le=1.0, default=0.5)  # Vulnerability's confidence
+
+
+class AttackChain(BaseModel):
+    """Composed attack sequence from multiple vulnerabilities."""
+    
+    chain_id: int
+    steps: List[AttackChainStep] = Field(default_factory=list)
+    title: str
+    description: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+    affected_components: List[int] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class DesignComponent(BaseModel):
     """Represents a machine-readable unit of the proposed system."""
     
@@ -107,6 +130,7 @@ class CrucibleState(BaseModel):
     # Conflict History (Append-only)
     vulnerabilities: List[Vulnerability] = Field(default_factory=list)
     patches: List[Patch] = Field(default_factory=list)
+    attack_chains: List[AttackChain] = Field(default_factory=list)  # Composed vulnerability chains
     iteration_summaries: List[IterationSummary] = Field(default_factory=list)
     
     # Active vulnerabilities for current iteration (working set)
