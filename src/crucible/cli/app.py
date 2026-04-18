@@ -44,12 +44,10 @@ except ImportError:
     pass  # Optional extension
 
 # Import evaluation framework
-from crucible.eval import (
-    CrucibleEvaluator,
-    BatchEvaluator,
-    WeightedAverageStrategy,
-    EvaluationReport,
-)
+from crucible.eval.evaluator import CrucibleEvaluator, BatchEvaluator
+from crucible.eval.aggregation import WeightedAverageStrategy
+from crucible.eval.schemas import EvaluationReport
+from crucible.bench import _load_bench_dataset, _run_bench_dataset
 
 # Configure logging
 logging.basicConfig(
@@ -537,12 +535,37 @@ def bench(
     console.print("[cyan]Batch Evaluation[/cyan]")
     console.print()
 
-    if dataset and dataset.exists():
+    if dataset:
+        if not dataset.exists():
+            console.print(f"[red]Error:[/red] Dataset file not found: {dataset}")
+            raise typer.Exit(1)
+
         console.print(f"  Dataset: {dataset}")
-        # TODO: Implement dataset-based evaluation
-        console.print("[yellow]Dataset-based evaluation not yet implemented[/yellow]")
-        console.print("[dim]For now, evaluates all runs in checkpoint directory[/dim]")
         console.print()
+
+        try:
+            dataset_payload = _load_bench_dataset(dataset)
+        except Exception as e:
+            console.print(f"[red]Invalid dataset:[/red] {e}")
+            raise typer.Exit(1)
+
+        evaluator = CrucibleEvaluator()
+        summary = _run_bench_dataset(
+            dataset=dataset_payload,
+            checkpoint_dir=checkpoint_dir,
+            output_dir=output_dir,
+            evaluator=evaluator,
+        )
+
+        console.print(f"[bold]Dataset:[/bold] {summary['dataset_id']}")
+        console.print(f"[bold]Cases:[/bold] {summary['cases_total']}")
+        console.print(f"[green]Succeeded:[/green] {summary['cases_succeeded']}")
+        console.print(f"[red]Failed:[/red] {summary['cases_failed']}")
+        console.print(f"[bold]Aggregate mean score:[/bold] {summary['aggregate_score_mean']:.3f}")
+        console.print(f"[dim]Config hash:[/dim] {summary['config_hash']}")
+        console.print(f"[green]Summary saved to:[/green] {output_dir / 'bench_summary.json'}")
+        return
+
     else:
         console.print("  No dataset specified, will evaluate all available runs")
         console.print()
