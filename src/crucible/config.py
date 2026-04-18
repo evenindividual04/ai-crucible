@@ -87,6 +87,13 @@ class BenchmarksConfig(BaseModel):
     enabled: bool = False
     fail_on_regression: bool = False
 
+class JudgeConfig(BaseModel):
+    """Configuration for the Judge's chain-aware decision logic."""
+    
+    chain_risk_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    chain_effectiveness_strategy: str = "min"  # mean, min, max
+    enable_chain_awareness: bool = True
+
 
 class LLMConfig(BaseModel):
     """Configuration for LLM providers."""
@@ -119,6 +126,7 @@ class CrucibleConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     scenarios: ScenariosConfig = Field(default_factory=ScenariosConfig)
     attack_chains: AttackChainsConfig = Field(default_factory=AttackChainsConfig)
+    judge: JudgeConfig = Field(default_factory=JudgeConfig)
     defender_strategy_sim: DefenderStrategySemConfig = Field(default_factory=DefenderStrategySemConfig)
     benchmarks: BenchmarksConfig = Field(default_factory=BenchmarksConfig)
     
@@ -184,7 +192,6 @@ class CrucibleConfig(BaseModel):
                 f"or add it to a .env file in the project directory."
             )
         return key
-
 
 def _load_from_dotenv(key_name: str) -> Optional[str]:
     """Load a key from .env file if it exists."""
