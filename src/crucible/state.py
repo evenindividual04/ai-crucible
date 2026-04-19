@@ -188,6 +188,7 @@ class CrucibleState(BaseModel):
     attack_effectiveness: List[dict] = Field(default_factory=list)  # per-agent effectiveness metrics
     defense_quality: Optional[dict] = None
     convergence_metrics: Optional[dict] = None
+    defender_strategy_simulation: Optional[dict] = None
     
     def allocate_component_id(self) -> int:
         """Allocate a new unique component ID."""

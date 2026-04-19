@@ -617,46 +617,41 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
         return {"status": "EVALUATING"}
         
     try:
-        # 1. Select Strategy
-        # If we haven't selected a mode yet (came from Red Team)
-        if state.status == "PATCHING":
-            mode = determine_defender_routing(state)
-            state.defender_mode = "ARCHITECT" if mode == "architect" else "QUICK_FIX"
-        
-        # 2. Execute Strategy
-        patches = []
-        updated_design = state.design_markdown
-        
-        if state.defender_mode == "QUICK_FIX":
-            logger.info("Running QuickFixer...")
-            if display:
-                display.show_agent_activity("Defender", "Generating tactical fixes")
-            
-            agent = QuickFixer()
-            agents_to_cleanup.append(agent)
-            _trace_agent_invoke("Defender", "QuickFixer")
-            output = agent.invoke(
-                design_markdown=state.design_markdown,
-                components=state.design_components,
-                vulnerabilities=active_vulns,
-            )
-            _trace_agent_complete(
-                "Defender",
-                "QuickFixer",
-                success=True,
-                vulnerabilities_found=0,
-            )
-            raw_patches = output.patches
-            updated_design = output.updated_design_markdown
-            
-            if display:
-                display.clear_agent_activity()
-            
-        elif state.defender_mode == "ARCHITECT":
+        def _execute_defender_mode(
+            mode: Literal["QUICK_FIX", "ARCHITECT", "COORDINATE"]
+        ) -> tuple[list[dict], str]:
+            """Execute a single defender mode and return (raw_patches, updated_design)."""
+            if mode == "QUICK_FIX":
+                logger.info("Running QuickFixer...")
+                if display:
+                    display.show_agent_activity("Defender", "Generating tactical fixes")
+
+                agent = QuickFixer()
+                agents_to_cleanup.append(agent)
+                _trace_agent_invoke("Defender", "QuickFixer")
+                output = agent.invoke(
+                    design_markdown=state.design_markdown,
+                    components=state.design_components,
+                    vulnerabilities=active_vulns,
+                )
+                _trace_agent_complete(
+                    "Defender",
+                    "QuickFixer",
+                    success=True,
+                    vulnerabilities_found=0,
+                )
+                if display:
+                    display.clear_agent_activity()
+                return output.patches, output.updated_design_markdown
+
+            if mode == "COORDINATE":
+                # Coordination-only mode does not generate new patches directly.
+                return [], state.design_markdown
+
             logger.info("Running ArchitectRefactorer...")
             if display:
                 display.show_agent_activity("Defender", "Generating strategic refactoring")
-            
+
             agent = ArchitectRefactorer()
             agents_to_cleanup.append(agent)
             _trace_agent_invoke("Defender", "ArchitectRefactorer")
@@ -671,19 +666,107 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
                 success=True,
                 vulnerabilities_found=0,
             )
-            raw_patches = output.patches
-            updated_design = output.updated_design_markdown
-            
             if display:
                 display.clear_agent_activity()
-            
-            # Architect can add components
-            # Note: We'd need to properly parse and merge new components here
-            # For now, we assume the design markdown reflects it
-            
-        else: # Coordinator (should usually be called after)
-             # But here we treat it as a final validation step implicitly
-             pass
+            return output.patches, output.updated_design_markdown
+
+        # 1. Select and execute strategy (or simulation matrix)
+        patches = []
+        updated_design = state.design_markdown
+        simulation_payload = None
+
+        simulation_cfg = getattr(config, "defender_strategy_sim", None)
+        simulation_enabled = bool(getattr(simulation_cfg, "enabled", False))
+        if simulation_enabled:
+            original_strategy = state.defender_strategy
+            strategy_order = ["tactical-first", "balanced", "architecture-first"]
+            snapshot_ids = [v.vulnerability_id for v in active_vulns]
+            runs = []
+            candidates: list[dict[str, Any]] = []
+
+            tracer = get_tracer()
+            snapshot_id = f"iter-{state.iteration_count}-{'-'.join(str(v) for v in snapshot_ids)}"
+            try:
+                for strategy_name in strategy_order:
+                    strategy_case_id = f"{snapshot_id}-{strategy_name}"
+                    if tracer:
+                        tracer.benchmark_case_start(
+                            benchmark_id="defender-strategy-sim",
+                            case_id=strategy_case_id,
+                            metadata={"strategy": strategy_name, "vulnerability_ids": snapshot_ids},
+                        )
+
+                    state.defender_strategy = strategy_name
+                    route = determine_defender_routing(state)
+                    mode: Literal["QUICK_FIX", "ARCHITECT"] = (
+                        "ARCHITECT" if route == "architect" else "QUICK_FIX"
+                    )
+                    raw_patches_candidate, updated_design_candidate = _execute_defender_mode(mode)
+
+                    run = {
+                        "strategy": strategy_name,
+                        "mode": mode,
+                        "vulnerability_snapshot_ids": snapshot_ids,
+                        "patches_applied": len(raw_patches_candidate),
+                    }
+                    runs.append(run)
+                    candidates.append(
+                        {
+                            "strategy": strategy_name,
+                            "mode": mode,
+                            "raw_patches": raw_patches_candidate,
+                            "updated_design": updated_design_candidate,
+                            "score": len(raw_patches_candidate) + (1 if mode == "ARCHITECT" else 0),
+                        }
+                    )
+
+                    if tracer:
+                        tracer.benchmark_case_end(
+                            benchmark_id="defender-strategy-sim",
+                            case_id=strategy_case_id,
+                            success=True,
+                            score=float(candidates[-1]["score"]),
+                            error_message=None,
+                        )
+            finally:
+                state.defender_strategy = original_strategy
+
+            winner = max(candidates, key=lambda c: (c["score"], c["strategy"] == "architecture-first"))
+            raw_patches = winner["raw_patches"]
+            updated_design = winner["updated_design"]
+            state.defender_mode = winner["mode"]
+            state.defender_strategy = winner["strategy"]
+
+            by_strategy = {
+                run["strategy"]: {
+                    "patches_applied": run["patches_applied"],
+                    "mode": run["mode"],
+                }
+                for run in runs
+            }
+            metric_deltas = {
+                strategy: winner["score"] - data["patches_applied"]
+                for strategy, data in by_strategy.items()
+            }
+            simulation_payload = {
+                "runs": runs,
+                "comparative_metrics": {"by_strategy": by_strategy},
+                "winner": {
+                    "strategy": winner["strategy"],
+                    "rationale": (
+                        f"Selected {winner['strategy']} using score={winner['score']} "
+                        "(patch count plus architect preference tie-break)."
+                    ),
+                    "metric_deltas": metric_deltas,
+                },
+            }
+        else:
+            # If we haven't selected a mode yet (came from Red Team)
+            if state.status == "PATCHING":
+                mode = determine_defender_routing(state)
+                state.defender_mode = "ARCHITECT" if mode == "architect" else "QUICK_FIX"
+
+            raw_patches, updated_design = _execute_defender_mode(state.defender_mode)
 
         # 3. Convert patches using PatchV2 / IncrementalPatch
         from crucible.patches_v2 import IncrementalPatch, DefenseJustification
@@ -829,6 +912,7 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
             "iteration_summaries": state.iteration_summaries + [summary],
             "iteration_count": state.iteration_count + 1,
             "status": "EVALUATING",
+            "defender_strategy_simulation": simulation_payload,
         }
 
     except Exception as e:

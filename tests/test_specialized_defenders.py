@@ -115,3 +115,12 @@ def test_config_rejects_invalid_defender_strategy():
         CrucibleConfig.load(overrides={
             "defender_strategy_sim": {"default_strategy": "unknown-strategy"}
         })
+
+
+def test_default_routing_path_is_unchanged_when_strategy_simulation_disabled(make_state):
+    state = make_state(iteration_count=2, severity="CRITICAL", strategy="tactical-first")
+
+    cfg = CrucibleConfig.load(overrides={"defender_strategy_sim": {"enabled": False}})
+
+    assert cfg.defender_strategy_sim.enabled is False
+    assert determine_defender_routing(state) == "architect"
