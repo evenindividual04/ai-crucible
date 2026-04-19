@@ -13,6 +13,9 @@ export type EventType =
   | 'VULNERABILITY_FOUND'
   | 'PATCH_APPLIED'
   | 'SCORE_UPDATE'
+  | 'ATTACK_EFFECTIVENESS_UPDATE'
+  | 'DEFENSE_QUALITY_UPDATE'
+  | 'CONVERGENCE_UPDATE'
   | 'JUDGE_DECISION'
   | 'ERROR';
 
@@ -60,4 +63,18 @@ export interface ScoreData {
     medium: number;
     low: number;
   };
+}
+
+export interface AttackEffectivenessData {
+  [key: string]: any;
+}
+
+export type AttackEffectivenessSeries = AttackEffectivenessData[];
+
+export interface DefenseQualityData {
+  [key: string]: any;
+}
+
+export interface ConvergenceData {
+  [key: string]: any;
 }

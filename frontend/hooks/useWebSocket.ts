@@ -156,12 +156,33 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
                 store.updateScore(event.data);
                 break;
 
+            case 'ATTACK_EFFECTIVENESS_UPDATE':
+                store.updateAttackEffectiveness(event.data);
+                break;
+
+            case 'DEFENSE_QUALITY_UPDATE':
+                store.updateDefenseQuality(event.data);
+                break;
+
+            case 'CONVERGENCE_UPDATE':
+                store.updateConvergenceData(event.data);
+                break;
+
             case 'ITERATION_START':
                 store.setIteration(event.data.iteration, event.data.max_iterations);
                 break;
 
             case 'SIMULATION_END':
                 store.setSimulating(false);
+                if (event.data.attack_effectiveness !== undefined) {
+                    store.updateAttackEffectiveness(event.data.attack_effectiveness);
+                }
+                if (event.data.defense_quality !== undefined) {
+                    store.updateDefenseQuality(event.data.defense_quality);
+                }
+                if (event.data.convergence_metrics !== undefined) {
+                    store.updateConvergenceData(event.data.convergence_metrics);
+                }
                 store.addRunToHistory({
                     id: event.data.run_id || `run-${Date.now()}`,
                     prompt: event.data.prompt || 'Unknown',

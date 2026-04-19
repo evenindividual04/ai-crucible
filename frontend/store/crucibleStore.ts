@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import { Node, Edge } from 'reactflow';
-import { Component, Vulnerability, Agent, ScoreData } from '@/types/events';
+import {
+    Component,
+    Vulnerability,
+    Agent,
+    ScoreData,
+    AttackEffectivenessSeries,
+    DefenseQualityData,
+    ConvergenceData,
+} from '@/types/events';
 
 export interface RunHistory {
     id: string;
@@ -41,6 +49,9 @@ interface CrucibleState {
 
     // Score
     scoreData: ScoreData | null;
+    attackEffectiveness: AttackEffectivenessSeries | null;
+    defenseQuality: DefenseQualityData | null;
+    convergenceData: ConvergenceData | null;
 
     // Iteration
     currentIteration: number;
@@ -65,6 +76,9 @@ interface CrucibleState {
     addAgent: (agent: Agent) => void;
     updateComponentRisk: (id: number, risk: string, vulnCount: number) => void;
     updateScore: (scoreData: ScoreData) => void;
+    updateAttackEffectiveness: (data: AttackEffectivenessSeries) => void;
+    updateDefenseQuality: (data: DefenseQualityData) => void;
+    updateConvergenceData: (data: ConvergenceData) => void;
     setIteration: (current: number, max: number) => void;
     incrementPatchCount: () => void;
     setSimulationStartTime: (time: number | null) => void;
@@ -94,6 +108,9 @@ export const useCrucibleStore = create<CrucibleState>((set, get) => ({
     nodes: [],
     edges: [],
     scoreData: null,
+    attackEffectiveness: null,
+    defenseQuality: null,
+    convergenceData: null,
     currentIteration: 0,
     maxIterations: 3,
     patchCount: 0,
@@ -177,6 +194,12 @@ export const useCrucibleStore = create<CrucibleState>((set, get) => ({
 
     updateScore: (scoreData) => set({ scoreData }),
 
+    updateAttackEffectiveness: (data) => set({ attackEffectiveness: data }),
+
+    updateDefenseQuality: (data) => set({ defenseQuality: data }),
+
+    updateConvergenceData: (data) => set({ convergenceData: data }),
+
     setIteration: (current, max) => set({ currentIteration: current, maxIterations: max }),
 
     incrementPatchCount: () => set((state) => ({ patchCount: state.patchCount + 1 })),
@@ -190,6 +213,9 @@ export const useCrucibleStore = create<CrucibleState>((set, get) => ({
         nodes: [],
         edges: [],
         scoreData: null,
+        attackEffectiveness: null,
+        defenseQuality: null,
+        convergenceData: null,
         currentIteration: 0,
         patchCount: 0,
         simulationStartTime: null,

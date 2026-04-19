@@ -16,6 +16,9 @@ EventType = Literal[
     "VULNERABILITY_FOUND",
     "PATCH_APPLIED",
     "SCORE_UPDATE",
+    "ATTACK_EFFECTIVENESS_UPDATE",
+    "DEFENSE_QUALITY_UPDATE",
+    "CONVERGENCE_UPDATE",
     "JUDGE_DECISION",
     "ERROR"
 ]
@@ -24,4 +27,4 @@ EventType = Literal[
 class WebSocketEvent(BaseModel):
     """Base WebSocket event"""
     type: EventType
-    data: Dict[str, Any]
+    data: Dict[str, Any] | List[Dict[str, Any]]

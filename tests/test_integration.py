@@ -8,6 +8,7 @@ import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
+from pydantic import ValidationError
 
 from crucible.state import CrucibleState, DesignComponent, Vulnerability, Patch
 from crucible.config import CrucibleConfig
@@ -17,6 +18,7 @@ from crucible.agents.defender import DefenderAgent, PatchOutput
 from crucible.judge.controller import JudgeController
 from crucible.judge.novelty import NoveltyChecker
 from crucible.router.keyword_router import KeywordRouter, route_agents
+from backend.src.models import WebSocketEvent
 
 
 # Mock LLM responses
@@ -348,3 +350,34 @@ class TestEndToEnd:
         
         assert len(novel) == 1
         assert decision.decision == "CONTINUE_TO_DEFEND"
+
+
+class TestDashboardTelemetryEvents:
+    """Contract tests for optional dashboard telemetry event types."""
+
+    @pytest.mark.parametrize(
+        "event_type",
+        [
+            "ATTACK_EFFECTIVENESS_UPDATE",
+            "DEFENSE_QUALITY_UPDATE",
+            "CONVERGENCE_UPDATE",
+        ],
+    )
+    def test_websocket_event_accepts_optional_telemetry_types(self, event_type):
+        evt = WebSocketEvent(type=event_type, data={"ok": True})
+        assert evt.type == event_type
+
+    def test_websocket_event_rejects_unknown_type(self):
+        with pytest.raises(ValidationError):
+            WebSocketEvent(type="UNKNOWN_TELEMETRY", data={})
+
+    def test_websocket_event_accepts_attack_effectiveness_series_payload(self):
+        evt = WebSocketEvent(
+            type="ATTACK_EFFECTIVENESS_UPDATE",
+            data=[
+                {"agent": "SecurityHawk", "effectiveness_ratio": 0.8},
+                {"agent": "ScaleMonster", "effectiveness_ratio": 0.6},
+            ],
+        )
+        assert isinstance(evt.data, list)
+        assert evt.data[0]["agent"] == "SecurityHawk"

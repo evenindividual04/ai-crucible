@@ -181,6 +181,24 @@ async def run_real_simulation(websocket: WebSocket, prompt: str, config: Dict[st
     })
 
     # Final summary
+    if final_state.attack_effectiveness is not None:
+        await websocket.send_json({
+            "type": "ATTACK_EFFECTIVENESS_UPDATE",
+            "data": final_state.attack_effectiveness,
+        })
+
+    if final_state.defense_quality is not None:
+        await websocket.send_json({
+            "type": "DEFENSE_QUALITY_UPDATE",
+            "data": final_state.defense_quality,
+        })
+
+    if final_state.convergence_metrics is not None:
+        await websocket.send_json({
+            "type": "CONVERGENCE_UPDATE",
+            "data": final_state.convergence_metrics,
+        })
+
     await websocket.send_json({
         "type": "SIMULATION_END",
         "data": {
