@@ -50,6 +50,9 @@ class PatchV2(BaseModel):
     # V2: Fix complexity
     fix_category: FixCategory = FixCategory.TACTICAL
 
+    # PR7: Strategy attribution
+    defender_strategy: Optional[Literal["tactical-first", "balanced", "architecture-first"]] = None
+
     # Compatibility / wiring fields
     description: Optional[str] = None               # alias for fix_description (test compatibility)
     vulnerability_summary: Optional[str] = None

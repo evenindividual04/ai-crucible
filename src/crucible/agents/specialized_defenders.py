@@ -4,11 +4,84 @@ Specialized Defender agents for the AI Crucible.
 Provides Quick Fixer, Architect Refactorer, and Defense Coordinator.
 """
 
+from abc import ABC, abstractmethod
 from typing import Any, List, Optional, Literal
 from pydantic import BaseModel, Field
 
 from crucible.agents.base import BaseAgent
-from crucible.state import Vulnerability, DesignComponent
+from crucible.state import Vulnerability, CrucibleState
+
+
+DefenderRoute = Literal["QUICK_FIX", "ARCHITECT"]
+
+
+class DefenderStrategyPolicy(ABC):
+  """Policy interface for selecting defender execution mode."""
+
+  name: str
+
+  @abstractmethod
+  def select_mode(self, state: CrucibleState) -> DefenderRoute:
+    """Select the defender mode for the given state."""
+
+
+class TacticalFirstStrategy(DefenderStrategyPolicy):
+  """Preserves legacy routing behavior (default strategy)."""
+
+  name = "tactical-first"
+
+  def select_mode(self, state: CrucibleState) -> DefenderRoute:
+    active_vulns = state.get_active_vulnerabilities()
+    has_critical_high = any(v.severity in ("CRITICAL", "HIGH") for v in active_vulns)
+    use_architect = has_critical_high and state.iteration_count >= 2
+    return "ARCHITECT" if use_architect else "QUICK_FIX"
+
+
+class BalancedStrategy(DefenderStrategyPolicy):
+  """Escalate sooner for persistent high-severity issues."""
+
+  name = "balanced"
+
+  def select_mode(self, state: CrucibleState) -> DefenderRoute:
+    active_vulns = state.get_active_vulnerabilities()
+    has_critical = any(v.severity == "CRITICAL" for v in active_vulns)
+    has_high = any(v.severity == "HIGH" for v in active_vulns)
+
+    if has_critical and state.iteration_count >= 1:
+      return "ARCHITECT"
+    if has_high and state.iteration_count >= 2:
+      return "ARCHITECT"
+    return "QUICK_FIX"
+
+
+class ArchitectureFirstStrategy(DefenderStrategyPolicy):
+  """Prefer structural remediation for high-severity vulnerabilities."""
+
+  name = "architecture-first"
+
+  def select_mode(self, state: CrucibleState) -> DefenderRoute:
+    active_vulns = state.get_active_vulnerabilities()
+    has_critical_high = any(v.severity in ("CRITICAL", "HIGH") for v in active_vulns)
+    return "ARCHITECT" if has_critical_high else "QUICK_FIX"
+
+
+DEFENDER_STRATEGIES: dict[str, DefenderStrategyPolicy] = {
+  TacticalFirstStrategy.name: TacticalFirstStrategy(),
+  BalancedStrategy.name: BalancedStrategy(),
+  ArchitectureFirstStrategy.name: ArchitectureFirstStrategy(),
+}
+
+
+def select_defender_mode(state: CrucibleState) -> DefenderRoute:
+  """Resolve configured strategy and select defender mode.
+
+  Unknown strategy values safely fallback to tactical-first.
+  """
+  strategy = DEFENDER_STRATEGIES.get(
+    state.defender_strategy,
+    DEFENDER_STRATEGIES["tactical-first"],
+  )
+  return strategy.select_mode(state)
 
 
 class QuickFixOutput(BaseModel):

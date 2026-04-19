@@ -583,21 +583,14 @@ def red_team_node(state: CrucibleState) -> Dict[str, Any]:
 
 
 
-def determine_defender_routing(state: CrucibleState) -> Literal["quick_fix", "architect", "coordinate"]:
-    """Determine which defender to use based on vulnerability severity."""
-    active_vulns = state.get_active_vulnerabilities()
-    
-    # Check for Critical/High vulnerabilities
-    has_critical_high = any(v.severity in ("CRITICAL", "HIGH") for v in active_vulns)
-    
-    # Check if we already tried QuickFixer for this iteration/vulnerability
-    # Simplification: If 3rd iteration or higher and still have criticals, try Architect
-    use_architect = has_critical_high and state.iteration_count >= 2
-    
-    if use_architect:
+def determine_defender_routing(state: CrucibleState) -> Literal["quick_fix", "architect"]:
+    """Determine defender routing via explicit strategy policy."""
+    from crucible.agents.specialized_defenders import select_defender_mode
+
+    mode = select_defender_mode(state)
+    if mode == "ARCHITECT":
         return "architect"
-    else:
-        return "quick_fix"
+    return "quick_fix"
 
 
 def defender_node(state: CrucibleState) -> Dict[str, Any]:
@@ -712,6 +705,7 @@ def defender_node(state: CrucibleState) -> Dict[str, Any]:
                 introduces_new_assumptions=p_data.get("introduces_new_assumptions", False),
                 patch_confidence="HIGH",
                 fix_category=fix_category,
+                defender_strategy=state.defender_strategy,
                 trade_offs=p_data.get("trade_offs"),
             )
 
@@ -1068,6 +1062,7 @@ async def run_crucible_async(user_prompt: str, config: CrucibleConfig | None = N
     initial_state = CrucibleState(
         user_prompt=user_prompt,
         max_iterations=config.max_iterations,
+        defender_strategy=config.defender_strategy_sim.default_strategy,
     )
     
     # Build and run the graph

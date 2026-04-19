@@ -7,7 +7,7 @@ following the schema defined in config-schema.md.
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -79,6 +79,11 @@ class DefenderStrategySemConfig(BaseModel):
     """Configuration for defender strategy simulation."""
     
     enabled: bool = False
+    default_strategy: Literal[
+        "tactical-first",
+        "balanced",
+        "architecture-first",
+    ] = "tactical-first"
 
 
 class BenchmarksConfig(BaseModel):

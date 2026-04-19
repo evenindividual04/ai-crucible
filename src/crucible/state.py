@@ -121,6 +121,12 @@ class CrucibleState(BaseModel):
     
     # Active Defender Mode
     defender_mode: Literal["QUICK_FIX", "ARCHITECT", "COORDINATE"] = "QUICK_FIX"
+    # Strategy policy controlling how defender mode is selected.
+    defender_strategy: Literal[
+        "tactical-first",
+        "balanced",
+        "architecture-first",
+    ] = "tactical-first"
     
     # ID Allocation (managed by orchestrator)
     next_component_id: int = 1

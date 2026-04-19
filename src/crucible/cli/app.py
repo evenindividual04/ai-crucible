@@ -7,7 +7,7 @@ Entry point for the command-line interface.
 import asyncio
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 import logging
 import json
 import warnings
@@ -87,6 +87,10 @@ def run(
     confidence_threshold: float = typer.Option(
         0.7, "--confidence-threshold",
         help="Minimum confidence for blocking vulnerabilities (0.0-1.0)"
+    ),
+    defender_strategy: Literal["tactical-first", "balanced", "architecture-first"] = typer.Option(
+        "tactical-first", "--defender-strategy",
+        help="Defender strategy policy to use"
     ),
     output_design: Optional[Path] = typer.Option(
         None, "--output-design", "-o",
@@ -207,6 +211,7 @@ def run(
         "sequential_mode": sequential,
         "similarity": {"threshold": similarity_threshold},
         "confidence": {"blocking_threshold": confidence_threshold},
+        "defender_strategy_sim": {"default_strategy": defender_strategy},
         "output": {"mode": mode},
         "llm": llm_overrides,
     }
@@ -288,6 +293,7 @@ async def _run_with_display(
     state = CrucibleState(
         user_prompt=prompt,
         max_iterations=config.max_iterations,
+        defender_strategy=config.defender_strategy_sim.default_strategy,
     )
 
     # Initialize tracer if enabled
