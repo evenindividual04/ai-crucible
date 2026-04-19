@@ -249,7 +249,30 @@ crucible eval <run_id>
 
 # Batch evaluate saved runs
 crucible bench
+
+# Gate releases with golden scenarios
+crucible bench \
+  --dataset evals/golden/golden_scenarios.json \
+  --output-dir evaluations/golden \
+  --fail-on-regression
+
+# First edit evals/golden/golden_scenarios.json and replace placeholder run_id values.
 ```
+
+#### Golden Regression Gate and Rollback
+
+- Golden datasets may define `expected_min_score` per case.
+- With `--fail-on-regression`, bench exits non-zero if any case falls below its threshold.
+- On gate failure, Crucible writes:
+  - `evaluations/<suite>/bench_summary.json`
+  - `evaluations/<suite>/rollback_instructions.md`
+
+Rollback workflow:
+
+1. Inspect `bench_summary.json` to identify regressing cases.
+2. Revert the risky change set (for example: `git revert <commit>`).
+3. Re-run without gating to inspect full results.
+4. Re-run with `--fail-on-regression` to restore the release gate.
 
 ### Configuration File
 

@@ -1,0 +1,19 @@
+{
+  "dataset_id": "golden_auth_payments_v1",
+  "cases": [
+    {
+      "case_id": "auth_baseline",
+      "run_id": "replace_with_auth_run_id",
+      "user_prompt": "Design a secure authentication system with session handling",
+      "expected_min_score": 0.75,
+      "repeat_index": 0
+    },
+    {
+      "case_id": "payments_baseline",
+      "run_id": "replace_with_payments_run_id",
+      "user_prompt": "Design a resilient payment pipeline with anti-fraud controls",
+      "expected_min_score": 0.78,
+      "repeat_index": 0
+    }
+  ]
+}

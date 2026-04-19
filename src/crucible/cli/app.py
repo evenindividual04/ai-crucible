@@ -47,7 +47,7 @@ except ImportError:
 from crucible.eval.evaluator import CrucibleEvaluator, BatchEvaluator
 from crucible.eval.aggregation import WeightedAverageStrategy
 from crucible.eval.schemas import EvaluationReport
-from crucible.bench import _load_bench_dataset, _run_bench_dataset
+from crucible.bench import BenchRegressionError, _load_bench_dataset, _run_bench_dataset
 
 # Configure logging
 logging.basicConfig(
@@ -532,6 +532,10 @@ def bench(
         Path("evaluations"), "--output-dir", "-o",
         help="Directory to save evaluation results"
     ),
+    fail_on_regression: bool = typer.Option(
+        False, "--fail-on-regression",
+        help="Fail (exit code 2) when any golden scenario regresses below expected_min_score"
+    ),
 ):
     """
     Batch evaluate multiple runs.
@@ -556,18 +560,24 @@ def bench(
             raise typer.Exit(1)
 
         evaluator = CrucibleEvaluator()
-        summary = _run_bench_dataset(
-            dataset=dataset_payload,
-            checkpoint_dir=checkpoint_dir,
-            output_dir=output_dir,
-            evaluator=evaluator,
-        )
+        try:
+            summary = _run_bench_dataset(
+                dataset=dataset_payload,
+                checkpoint_dir=checkpoint_dir,
+                output_dir=output_dir,
+                evaluator=evaluator,
+                fail_on_regression=fail_on_regression,
+            )
+        except BenchRegressionError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(2)
 
         console.print(f"[bold]Dataset:[/bold] {summary['dataset_id']}")
         console.print(f"[bold]Cases:[/bold] {summary['cases_total']}")
         console.print(f"[green]Succeeded:[/green] {summary['cases_succeeded']}")
         console.print(f"[red]Failed:[/red] {summary['cases_failed']}")
         console.print(f"[bold]Aggregate mean score:[/bold] {summary['aggregate_score_mean']:.3f}")
+        console.print(f"[bold]Regressions:[/bold] {summary['regression_count']}")
         console.print(f"[dim]Config hash:[/dim] {summary['config_hash']}")
         console.print(f"[green]Summary saved to:[/green] {output_dir / 'bench_summary.json'}")
         return

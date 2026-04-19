@@ -131,6 +131,8 @@ The evaluation subsystem adds observability and benchmarkability to the control 
 * **Aggregation**: weighted average, min, max, product, custom formulas.
 * **Reporters**: JSON, Markdown, HTML output formats.
 * **Batch evaluation**: compare and summarize multiple saved runs.
+* **Regression gate**: benchmark datasets can include `expected_min_score` per case; `--fail-on-regression` enforces golden-baseline thresholds.
+* **Rollback artifact**: failed gates emit `rollback_instructions.md` alongside `bench_summary.json` for deterministic recovery.
 
 ### CLI Integration
 
