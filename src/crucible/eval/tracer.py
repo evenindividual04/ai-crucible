@@ -16,6 +16,10 @@ from crucible.eval.schemas import (
     AgentCompleteEvent,
     AgentInvokeEvent,
     AgentType,
+    BenchmarkCaseEndEvent,
+    BenchmarkCaseStartEvent,
+    ChainDiscoveredEvent,
+    ChainMitigatedEvent,
     DesignValidatedEvent,
     IterationEndEvent,
     IterationStartEvent,
@@ -287,6 +291,74 @@ class CrucibleTracer:
             patch_id=patch_id,
             target_vulnerability_id=target_vulnerability_id,
             rejection_reason=rejection_reason,
+        )
+        self.add_event(event)
+
+    def chain_discovered(
+        self,
+        chain_id: int,
+        vulnerability_ids: list[int],
+        attack_path: list[str] | None = None,
+        severity: str | None = None,
+    ) -> None:
+        """Mark discovery of an attack chain."""
+        event = ChainDiscoveredEvent(
+            chain_id=chain_id,
+            vulnerability_ids=vulnerability_ids,
+            attack_path=attack_path,
+            severity=severity,
+        )
+        self.add_event(event)
+
+    def chain_mitigated(
+        self,
+        chain_id: int,
+        patch_ids: list[int],
+        mitigated: bool,
+        residual_risk: float | None = None,
+    ) -> None:
+        """Mark mitigation status of an attack chain."""
+        event = ChainMitigatedEvent(
+            chain_id=chain_id,
+            patch_ids=patch_ids,
+            mitigated=mitigated,
+            residual_risk=residual_risk,
+        )
+        self.add_event(event)
+
+    def benchmark_case_start(
+        self,
+        benchmark_id: str,
+        case_id: str,
+        input_hash: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Mark the start of a benchmark case."""
+        event = BenchmarkCaseStartEvent(
+            benchmark_id=benchmark_id,
+            case_id=case_id,
+            input_hash=input_hash,
+            metadata=metadata,
+        )
+        self.add_event(event)
+
+    def benchmark_case_end(
+        self,
+        benchmark_id: str,
+        case_id: str,
+        success: bool,
+        score: float | None = None,
+        duration_ms: float | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """Mark completion of a benchmark case."""
+        event = BenchmarkCaseEndEvent(
+            benchmark_id=benchmark_id,
+            case_id=case_id,
+            success=success,
+            score=score,
+            duration_ms=duration_ms,
+            error_message=error_message,
         )
         self.add_event(event)
 

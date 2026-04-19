@@ -34,6 +34,14 @@ class TraceEventType(str, Enum):
     PATCH_APPLIED = "patch_applied"
     PATCH_REJECTED = "patch_rejected"
 
+    # Attack chain events
+    CHAIN_DISCOVERED = "chain_discovered"
+    CHAIN_MITIGATED = "chain_mitigated"
+
+    # Benchmark case events
+    BENCHMARK_CASE_START = "benchmark_case_start"
+    BENCHMARK_CASE_END = "benchmark_case_end"
+
     # Judge events
     JUDGE_DECISION = "judge_decision"
     DESIGN_VALIDATED = "design_validated"
@@ -169,6 +177,48 @@ class PatchRejectedEvent(TraceEvent):
     patch_id: int
     target_vulnerability_id: int
     rejection_reason: str
+
+
+class ChainDiscoveredEvent(TraceEvent):
+    """Event marking discovery of an attack chain."""
+
+    event_type: Literal[TraceEventType.CHAIN_DISCOVERED] = TraceEventType.CHAIN_DISCOVERED
+    chain_id: int
+    vulnerability_ids: list[int] = Field(default_factory=list)
+    attack_path: list[str] | None = None
+    severity: str | None = None
+
+
+class ChainMitigatedEvent(TraceEvent):
+    """Event marking mitigation status of an attack chain."""
+
+    event_type: Literal[TraceEventType.CHAIN_MITIGATED] = TraceEventType.CHAIN_MITIGATED
+    chain_id: int
+    patch_ids: list[int] = Field(default_factory=list)
+    mitigated: bool
+    residual_risk: float | None = None
+
+
+class BenchmarkCaseStartEvent(TraceEvent):
+    """Event marking start of a benchmark case."""
+
+    event_type: Literal[TraceEventType.BENCHMARK_CASE_START] = TraceEventType.BENCHMARK_CASE_START
+    benchmark_id: str
+    case_id: str
+    input_hash: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class BenchmarkCaseEndEvent(TraceEvent):
+    """Event marking completion of a benchmark case."""
+
+    event_type: Literal[TraceEventType.BENCHMARK_CASE_END] = TraceEventType.BENCHMARK_CASE_END
+    benchmark_id: str
+    case_id: str
+    success: bool
+    score: float | None = None
+    duration_ms: float | None = None
+    error_message: str | None = None
 
 
 class JudgeDecisionEvent(TraceEvent):
