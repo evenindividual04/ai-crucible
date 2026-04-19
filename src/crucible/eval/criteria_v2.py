@@ -6,8 +6,10 @@ to complete the evaluation metrics set.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from crucible.eval.schemas import CriterionScore, Trace, TraceEventType, AgentType
+from crucible.state import CrucibleState
 
 
 class PatchQualityCriterion:
@@ -120,5 +122,98 @@ class JudgeQualityCriterion:
                 "total_iterations": total_iterations,
                 "iterations_used": trace.iteration_count,
                 "termination_events": termination_count,
+            },
+        )
+
+
+class ChainQualityCriterion:
+    """Measures quality of discovered attack chains."""
+
+    @property
+    def name(self) -> str:
+        return "chain_quality"
+
+    def evaluate(self, trace: Trace, state: CrucibleState | None = None) -> CriterionScore:
+        """Evaluate chain quality from state and trace context."""
+        chains = getattr(state, "attack_chains", []) if state else []
+        total_chains = len(chains)
+
+        if total_chains == 0:
+            return CriterionScore(
+                name=self.name,
+                value=0.0,
+                details={
+                    "total_chains": 0,
+                    "mean_chain_confidence": 0.0,
+                    "data_available": False,
+                },
+            )
+
+        confidences = [c.confidence for c in chains]
+        mean_confidence = sum(confidences) / total_chains
+
+        # Reward both chain richness and confidence while keeping score bounded.
+        chain_depth_factor = min(1.0, total_chains / 3.0)
+        score = 0.7 * mean_confidence + 0.3 * chain_depth_factor
+
+        return CriterionScore(
+            name=self.name,
+            value=min(1.0, max(0.0, score)),
+            details={
+                "total_chains": total_chains,
+                "mean_chain_confidence": mean_confidence,
+                "chain_depth_factor": chain_depth_factor,
+                "data_available": True,
+            },
+        )
+
+
+class StrategyQualityCriterion:
+    """Measures quality of defender strategy simulation outcomes."""
+
+    @property
+    def name(self) -> str:
+        return "strategy_quality"
+
+    def evaluate(self, trace: Trace, state: CrucibleState | None = None) -> CriterionScore:
+        """Evaluate strategy quality from defender strategy simulation payload."""
+        payload: dict[str, Any] = (getattr(state, "defender_strategy_simulation", None) if state else None) or {}
+        winner = payload.get("winner", {})
+        winner_strategy = winner.get("strategy")
+        metric_deltas = winner.get("metric_deltas", {}) or {}
+
+        if not winner_strategy:
+            return CriterionScore(
+                name=self.name,
+                value=0.0,
+                details={
+                    "winner_strategy": None,
+                    "metric_deltas": {},
+                    "data_available": False,
+                },
+            )
+
+        # Normalize score using winner margin over alternatives if available.
+        margin = 0.0
+        if metric_deltas:
+            numeric_deltas = []
+            for value in metric_deltas.values():
+                try:
+                    numeric_deltas.append(float(value))
+                except (TypeError, ValueError):
+                    continue
+            margin = max(numeric_deltas) if numeric_deltas else 0.0
+
+        normalized_margin = max(0.0, min(1.0, margin / 5.0))
+        score = 0.5 + 0.5 * normalized_margin
+
+        return CriterionScore(
+            name=self.name,
+            value=min(1.0, max(0.0, score)),
+            details={
+                "winner_strategy": winner_strategy,
+                "metric_deltas": metric_deltas,
+                "winner_rationale": winner.get("rationale"),
+                "data_available": True,
             },
         )

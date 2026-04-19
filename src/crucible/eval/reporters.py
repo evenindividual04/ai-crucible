@@ -276,3 +276,61 @@ class HTMLReporter(Reporter):
             else:
                 items.append(f"{key}: {value}")
         return ", ".join(items) if items else "-"
+
+
+class LeaderboardReporter:
+    """Builds deterministic leaderboard payloads for benchmark comparisons."""
+
+    def build(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """Build leaderboard rows and explainability notes.
+
+        Deterministic ordering:
+        1) aggregate_score desc
+        2) wins desc
+        3) strategy asc
+        4) scenario asc
+        """
+        def _safe_float(value: Any, default: float = 0.0) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        def _safe_int(value: Any, default: int = 0) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        ranked = sorted(
+            rows,
+            key=lambda r: (
+                -_safe_float(r.get("aggregate_score", 0.0)),
+                -_safe_int(r.get("wins", 0)),
+                str(r.get("strategy", "")),
+                str(r.get("scenario", "")),
+            ),
+        )
+
+        output_rows = []
+        explanations = []
+        for index, row in enumerate(ranked, start=1):
+            ranked_row = dict(row)
+            ranked_row["rank"] = index
+            output_rows.append(ranked_row)
+
+            explanations.append(
+                {
+                    "strategy": row.get("strategy"),
+                    "scenario": row.get("scenario"),
+                    "why_ranked": (
+                        f"Ranked #{index} by aggregate_score={row.get('aggregate_score', 0.0)} "
+                        f"and wins={row.get('wins', 0)}"
+                    ),
+                }
+            )
+
+        return {
+            "rows": output_rows,
+            "explanations": explanations,
+        }

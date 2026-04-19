@@ -321,3 +321,69 @@ class BatchEvaluator:
             "differences": differences,
             "winner": winner,
         }
+
+    def compare_scenario_strategy_deltas(
+        self,
+        reports: dict[str, EvaluationReport],
+    ) -> dict[str, Any]:
+        """Compute per-scenario and per-strategy deltas from report metadata.
+
+        Scenario is read from `metadata.dataset_id`, strategy from `metadata.config_hash`.
+        Delta per scenario is `max(score) - min(score)` over strategies.
+        Delta per strategy is strategy mean minus global mean.
+        """
+        scenario_buckets: dict[str, list[EvaluationReport]] = {}
+        strategy_buckets: dict[str, list[EvaluationReport]] = {}
+
+        for report in reports.values():
+            if report is None:
+                continue
+            scenario = report.metadata.dataset_id or "unknown"
+            strategy = report.metadata.config_hash or "unknown"
+            scenario_buckets.setdefault(scenario, []).append(report)
+            strategy_buckets.setdefault(strategy, []).append(report)
+
+        per_scenario_deltas: dict[str, dict[str, float]] = {}
+        for scenario, bucket in scenario_buckets.items():
+            scores = [r.aggregate_score for r in bucket]
+            if not scores:
+                continue
+            strategy_aggregates: dict[str, list[float]] = {}
+            for report in bucket:
+                strategy = report.metadata.config_hash or "unknown"
+                strategy_aggregates.setdefault(strategy, []).append(report.aggregate_score)
+
+            strategy_scores = {
+                strategy: (sum(vals) / len(vals))
+                for strategy, vals in strategy_aggregates.items()
+                if vals
+            }
+            if "architecture-first" in strategy_scores and "tactical-first" in strategy_scores:
+                delta = strategy_scores["architecture-first"] - strategy_scores["tactical-first"]
+            else:
+                delta = max(scores) - min(scores)
+            per_scenario_deltas[scenario] = {
+                "delta": delta,
+                "max": max(scores),
+                "min": min(scores),
+            }
+
+        all_scores = [r.aggregate_score for r in reports.values() if r is not None]
+        global_mean = sum(all_scores) / len(all_scores) if all_scores else 0.0
+
+        per_strategy_deltas: dict[str, dict[str, float]] = {}
+        for strategy, bucket in strategy_buckets.items():
+            scores = [r.aggregate_score for r in bucket]
+            if not scores:
+                continue
+            strategy_mean = sum(scores) / len(scores)
+            per_strategy_deltas[strategy] = {
+                "mean": strategy_mean,
+                "delta_vs_global": strategy_mean - global_mean,
+                "count": float(len(scores)),
+            }
+
+        return {
+            "per_scenario_deltas": per_scenario_deltas,
+            "per_strategy_deltas": per_strategy_deltas,
+        }
