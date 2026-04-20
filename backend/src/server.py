@@ -8,8 +8,12 @@ import sys
 import json
 import uuid
 import os
+import secrets
 import time
+import hashlib
+import hmac
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 # Add the main package source to path so the backend venv can import crucible
 _repo_root = Path(__file__).resolve().parents[3]
@@ -46,11 +50,23 @@ logger = logging.getLogger(__name__)
 _CREATE_RUN_WINDOW_SECONDS = 60
 _CREATE_RUN_MAX_REQUESTS = 20
 _create_run_timestamps: dict[str, list[float]] = {}
+_WS_HANDSHAKE_TIMEOUT_SECONDS = 5
+_WS_WINDOW_SECONDS = 60
+_WS_MAX_CONNECTS = 40
+_WS_MAX_ACTIONS = 120
+_ws_timestamps: dict[str, list[float]] = {}
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    create_db_and_tables()
+    yield
 
 app = FastAPI(
     title="AI Crucible API",
     description="Real-time WebSocket API for War Room Dashboard",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS middleware for local development
@@ -86,6 +102,7 @@ class RunSummaryResponse(BaseModel):
     status: str
     mode: str
     task_id: Optional[str] = None
+    access_token: Optional[str] = None
 
 
 def _enforce_live_run_access(http_request: Request) -> None:
@@ -130,8 +147,77 @@ def _enforce_live_run_read_access(http_request: Request, run: RunRecord) -> None
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+def _enforce_run_owner_access(run: RunRecord, provided_token: str) -> None:
+    if not provided_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    provided_hash = hashlib.sha256(provided_token.encode("utf-8")).hexdigest()
+    if not hmac.compare_digest(provided_hash, run.access_token_hash):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _client_identity(http_request: Request) -> str:
+    trust_proxy = os.getenv("CRUCIBLE_TRUST_PROXY_HEADERS", "false").lower() == "true"
+    if trust_proxy:
+        forwarded = http_request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return http_request.client.host if http_request.client else "unknown"
+
+
+def _websocket_client_identity(websocket: WebSocket) -> str:
+    trust_proxy = os.getenv("CRUCIBLE_TRUST_PROXY_HEADERS", "false").lower() == "true"
+    if trust_proxy:
+        forwarded = websocket.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return websocket.client.host if websocket.client else "unknown"
+
+
+def _enforce_ws_rate_limit(client_key: str, action: str, max_requests: int) -> None:
+    key = f"rl:ws:{action}:{client_key}:{int(time.time() // _WS_WINDOW_SECONDS)}"
+    try:
+        client = redis_client()
+        count = client.incr(key)
+        if count == 1:
+            client.expire(key, _WS_WINDOW_SECONDS)
+        if count > max_requests:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("Redis websocket rate limiter unavailable, using process-local fallback")
+
+    fallback_key = f"ws:{action}:{client_key}"
+    now = time.time()
+    window_start = now - _WS_WINDOW_SECONDS
+    recent = [ts for ts in _ws_timestamps.get(fallback_key, []) if ts >= window_start]
+    if len(recent) >= max_requests:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    recent.append(now)
+    _ws_timestamps[fallback_key] = recent
+
+
 def _enforce_create_run_rate_limit(http_request: Request) -> None:
-    client_ip = http_request.client.host if http_request.client else "unknown"
+    client_ip = _client_identity(http_request)
+
+    # Primary limiter: Redis fixed-window counter to work across instances.
+    try:
+        window = int(time.time() // _CREATE_RUN_WINDOW_SECONDS)
+        key = f"rl:create_run:{client_ip}:{window}"
+        client = redis_client()
+        count = client.incr(key)
+        if count == 1:
+            client.expire(key, _CREATE_RUN_WINDOW_SECONDS)
+        if count > _CREATE_RUN_MAX_REQUESTS:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded")
+        return
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("Redis rate limiter unavailable, using process-local fallback")
+
+    # Fallback for local/dev runs when Redis is unavailable.
     now = time.time()
     window_start = now - _CREATE_RUN_WINDOW_SECONDS
 
@@ -141,11 +227,6 @@ def _enforce_create_run_rate_limit(http_request: Request) -> None:
 
     recent.append(now)
     _create_run_timestamps[client_ip] = recent
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    create_db_and_tables()
 
 
 @app.get("/")
@@ -187,11 +268,14 @@ async def create_run(request: CreateRunRequest, http_request: Request) -> RunSum
         _enforce_live_run_access(http_request)
 
     run_id = f"run_{uuid.uuid4().hex[:12]}"
+    access_token = secrets.token_urlsafe(24)
+    access_token_hash = hashlib.sha256(access_token.encode("utf-8")).hexdigest()
 
     with get_session() as session:
         run = RunRecord(
             id=run_id,
             prompt=request.prompt,
+            access_token_hash=access_token_hash,
             mode=request.mode,
             status="queued",
         )
@@ -217,7 +301,7 @@ async def create_run(request: CreateRunRequest, http_request: Request) -> RunSum
                 )
             session.commit()
 
-        return RunSummaryResponse(run_id=run_id, status="completed", mode="demo")
+        return RunSummaryResponse(run_id=run_id, status="completed", mode="demo", access_token=access_token)
 
     try:
         task = run_simulation_task.delay(run_id=run_id, prompt=request.prompt, config=request.config or {})
@@ -232,7 +316,13 @@ async def create_run(request: CreateRunRequest, http_request: Request) -> RunSum
                 session.commit()
         raise HTTPException(status_code=503, detail="Simulation queue unavailable") from exc
 
-    return RunSummaryResponse(run_id=run_id, status="queued", mode="live", task_id=task.id)
+    return RunSummaryResponse(
+        run_id=run_id,
+        status="queued",
+        mode="live",
+        task_id=task.id,
+        access_token=access_token,
+    )
 
 
 @app.get("/runs/{run_id}")
@@ -241,6 +331,7 @@ async def get_run_status(run_id: str, http_request: Request) -> dict[str, Any]:
     if not run:
         raise HTTPException(status_code=404, detail="run_not_found")
     _enforce_live_run_read_access(http_request, run)
+    _enforce_run_owner_access(run, http_request.headers.get("x-run-token", ""))
 
     return {
         "run_id": run.id,
@@ -266,6 +357,7 @@ async def get_run_events(
     if not run:
         raise HTTPException(status_code=404, detail="run_not_found")
     _enforce_live_run_read_access(http_request, run)
+    _enforce_run_owner_access(run, http_request.headers.get("x-run-token", ""))
 
     events = list_run_events(run_id, limit=limit)
     return {
@@ -491,20 +583,31 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     await websocket.accept()
     logger.info("WebSocket connection established")
+    client_key = _websocket_client_identity(websocket)
     
     try:
         # Wait for start message from client
-        data = await websocket.receive_json()
+        _enforce_ws_rate_limit(client_key, "connect", _WS_MAX_CONNECTS)
+        data = await asyncio.wait_for(websocket.receive_json(), timeout=_WS_HANDSHAKE_TIMEOUT_SECONDS)
+        _enforce_ws_rate_limit(client_key, "message", _WS_MAX_ACTIONS)
         
         if data.get("type") == "SUBSCRIBE_RUN":
             _enforce_websocket_access(websocket)
             run_id = data.get("data", {}).get("run_id", "")
+            run_token = data.get("data", {}).get("run_token", "")
             if not run_id:
                 await websocket.send_json({
                     "type": "ERROR",
                     "data": {"message": "Missing run_id for SUBSCRIBE_RUN"},
                 })
                 return
+            run = get_run(run_id)
+            if not run:
+                await websocket.send_json({"type": "ERROR", "data": {"message": "run_not_found"}})
+                return
+
+            provided_run_token = run_token or websocket.headers.get("x-run-token", "")
+            _enforce_run_owner_access(run, provided_run_token)
             await _stream_run_subscription(websocket, run_id)
             return
 
@@ -548,12 +651,25 @@ async def websocket_endpoint(websocket: WebSocket):
         
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected by client")
+    except TimeoutError:
+        try:
+            await websocket.send_json({"type": "ERROR", "data": {"message": "handshake_timeout"}})
+        except Exception:
+            pass
+    except HTTPException as exc:
+        try:
+            await websocket.send_json({
+                "type": "ERROR",
+                "data": {"message": str(exc.detail)},
+            })
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         try:
             await websocket.send_json({
                 "type": "ERROR",
-                "data": {"message": str(e)}
+                "data": {"message": "websocket_error"}
             })
         except:
             pass

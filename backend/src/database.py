@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import secrets
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -17,6 +19,7 @@ def utc_now() -> datetime:
 class RunRecord(SQLModel, table=True):
     id: str = Field(primary_key=True)
     prompt: str
+    access_token_hash: str
     status: str = Field(default="queued")
     mode: str = Field(default="live")  # live | demo
     created_at: datetime = Field(default_factory=utc_now)
@@ -51,6 +54,45 @@ engine = create_db_engine()
 
 def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
+    _ensure_sqlite_compat_columns()
+
+
+def _ensure_sqlite_compat_columns() -> None:
+    """Apply additive SQLite-compatible schema fixes for local dev/test databases."""
+    database_url = _database_url()
+    if not database_url.startswith("sqlite"):
+        return
+
+    with engine.connect() as conn:
+        columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(runrecord)").fetchall()}
+        if "access_token_hash" not in columns:
+            conn.exec_driver_sql("ALTER TABLE runrecord ADD COLUMN access_token_hash TEXT NOT NULL DEFAULT ''")
+
+        token_source_column = "access_token" if "access_token" in columns else None
+        rows = conn.exec_driver_sql(
+            "SELECT id, access_token_hash"
+            + (", access_token" if token_source_column else "")
+            + " FROM runrecord"
+        ).fetchall()
+
+        for row in rows:
+            run_id = row[0]
+            token_hash = row[1] or ""
+            if token_hash:
+                continue
+
+            token_value = ""
+            if token_source_column:
+                token_value = row[2] or ""
+            if not token_value:
+                token_value = secrets.token_urlsafe(24)
+
+            hashed = hashlib.sha256(token_value.encode("utf-8")).hexdigest()
+            conn.exec_driver_sql(
+                "UPDATE runrecord SET access_token_hash = :token_hash WHERE id = :run_id",
+                {"token_hash": hashed, "run_id": run_id},
+            )
+            conn.commit()
 
 
 def get_session() -> Session:

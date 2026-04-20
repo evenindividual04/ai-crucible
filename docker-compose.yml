@@ -4,35 +4,33 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-crucible}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crucible}
-      POSTGRES_DB: ${POSTGRES_DB:-crucible}
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER?err}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?err}
+      POSTGRES_DB: ${POSTGRES_DB?err}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crucible} -d ${POSTGRES_DB:-crucible}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
 
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-crucible}:${POSTGRES_PASSWORD:-crucible}@postgres:5432/${POSTGRES_DB:-crucible}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       CRUCIBLE_API_KEY: ${CRUCIBLE_API_KEY:-}
       CRUCIBLE_ENABLE_LIVE_RUNS: ${CRUCIBLE_ENABLE_LIVE_RUNS:-false}
@@ -43,6 +41,9 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   worker:
     build:
@@ -50,13 +51,16 @@ services:
       dockerfile: backend/Dockerfile
     command: ["celery", "-A", "backend.src.tasks.celery_app", "worker", "--loglevel=info"]
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-crucible}:${POSTGRES_PASSWORD:-crucible}@postgres:5432/${POSTGRES_DB:-crucible}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   frontend:
     build:
@@ -69,6 +73,9 @@ services:
       - backend
     ports:
       - "3000:3000"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   pgdata:

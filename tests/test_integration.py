@@ -529,19 +529,23 @@ class TestRunApi:
             payload = create_resp.json()
             assert payload["status"] == "completed"
             run_id = payload["run_id"]
+            run_token = payload["access_token"]
 
-            status_resp = client.get(f"/runs/{run_id}")
+            status_resp = client.get(f"/runs/{run_id}", headers={"x-run-token": run_token})
             assert status_resp.status_code == 200
             status_payload = status_resp.json()
             assert status_payload["status"] == "completed"
             assert status_payload["mode"] == "demo"
 
-            events_resp = client.get(f"/runs/{run_id}/events")
+            events_resp = client.get(f"/runs/{run_id}/events", headers={"x-run-token": run_token})
             assert events_resp.status_code == 200
             events_payload = events_resp.json()
             assert events_payload["run_id"] == run_id
             assert len(events_payload["events"]) > 0
             assert events_payload["events"][-1]["type"] == "SIMULATION_END"
+
+            unauthorized = client.get(f"/runs/{run_id}")
+            assert unauthorized.status_code == 401
 
     def test_create_demo_run_with_invalid_demo_id_returns_404(self):
         with TestClient(app) as client:
@@ -588,12 +592,12 @@ class TestRunApi:
 
     def test_get_unknown_run_returns_404(self):
         with TestClient(app) as client:
-            resp = client.get("/runs/run_missing")
+            resp = client.get("/runs/run_missing", headers={"x-run-token": "missing"})
             assert resp.status_code == 404
 
     def test_get_unknown_run_events_returns_404(self):
         with TestClient(app) as client:
-            resp = client.get("/runs/run_missing/events")
+            resp = client.get("/runs/run_missing/events", headers={"x-run-token": "missing"})
             assert resp.status_code == 404
 
     def test_run_events_limit_is_bounded(self):
@@ -607,6 +611,7 @@ class TestRunApi:
                 },
             )
             run_id = create_resp.json()["run_id"]
+            run_token = create_resp.json()["access_token"]
 
-            resp = client.get(f"/runs/{run_id}/events?limit=1001")
+            resp = client.get(f"/runs/{run_id}/events?limit=1001", headers={"x-run-token": run_token})
             assert resp.status_code == 422

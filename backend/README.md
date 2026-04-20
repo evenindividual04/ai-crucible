@@ -15,6 +15,20 @@ python -m src.server
 
 Server runs on `http://localhost:8000`
 
+### Database Migrations (Alembic)
+
+```bash
+# Run from repository root
+pip install -r backend/requirements.txt
+alembic -c backend/alembic.ini upgrade head
+```
+
+Create a new migration after model changes:
+
+```bash
+alembic -c backend/alembic.ini revision --autogenerate -m "describe change"
+```
+
 ### Frontend (Next.js Dashboard)
 
 ```bash
@@ -65,6 +79,15 @@ Key events:
 - `PATCH_APPLIED` - Patch applied
 - `SCORE_UPDATE` - Security score updated
 - `SIMULATION_END` - Simulation complete
+
+## 🔐 Run API Access
+
+- `POST /runs` returns `access_token` scoped to that run.
+- `GET /runs/{run_id}` and `GET /runs/{run_id}/events` require header `x-run-token: <access_token>`.
+- Live mode (`mode=live` or websocket `use_mock=false`) also requires:
+	- `CRUCIBLE_ENABLE_LIVE_RUNS=true`
+	- `CRUCIBLE_API_KEY` set
+	- Header `x-api-key: <CRUCIBLE_API_KEY>`
 
 ## 🎯 Next Steps
 
