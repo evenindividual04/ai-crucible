@@ -48,6 +48,22 @@ class WebSocketEvent(BaseModel):
             "JUDGE_DECISION",
             "ERROR",
         }
+        required_keys: dict[str, set[str]] = {
+            "SYSTEM_INIT": {"prompt", "config", "timestamp"},
+            "SIMULATION_END": {"status", "iterations"},
+            "ITERATION_START": {"iteration", "max_iterations"},
+            "AGENT_SPAWN": {"id", "name", "type"},
+            "COMPONENT_CREATED": {"id", "name", "type"},
+            "COMPONENT_RISK_UPDATE": {"component_id", "risk_level", "vulnerability_count"},
+            "VULNERABILITY_FOUND": {"id", "severity", "title"},
+            "PATCH_APPLIED": {"id", "target_vulnerability_id", "description"},
+            "SCORE_UPDATE": {"score"},
+            "DEFENSE_QUALITY_UPDATE": set(),
+            "CONVERGENCE_UPDATE": set(),
+            "JUDGE_DECISION": {"decision", "reason"},
+            "ERROR": {"message"},
+            "AGENT_THINKING": set(),
+        }
 
         if self.type in list_payload_events:
             if not isinstance(self.data, list):
@@ -58,5 +74,10 @@ class WebSocketEvent(BaseModel):
 
         if self.type in dict_payload_events and not isinstance(self.data, dict):
             raise ValueError(f"{self.type} requires object payload")
+
+        if self.type in required_keys and isinstance(self.data, dict):
+            missing = required_keys[self.type] - set(self.data.keys())
+            if missing:
+                raise ValueError(f"{self.type} missing required keys: {sorted(missing)}")
 
         return self

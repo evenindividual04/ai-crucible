@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 from pydantic import ValidationError
+from fastapi.testclient import TestClient
 
 from crucible.state import CrucibleState, DesignComponent, Vulnerability, Patch
 from crucible.config import CrucibleConfig
@@ -20,7 +21,7 @@ from crucible.judge.controller import JudgeController
 from crucible.judge.novelty import NoveltyChecker
 from crucible.router.keyword_router import KeywordRouter, route_agents
 from backend.src.models import WebSocketEvent
-from backend.src.server import run_real_simulation
+from backend.src.server import app, run_real_simulation
 
 
 # Mock LLM responses
@@ -398,6 +399,14 @@ class TestDashboardTelemetryEvents:
                 data=[{"first_time_fix_rate": 0.5}],
             )
 
+    def test_websocket_event_rejects_iteration_start_without_required_fields(self):
+        with pytest.raises(ValidationError):
+            WebSocketEvent(type="ITERATION_START", data={"iteration": 1})
+
+    def test_websocket_event_rejects_component_created_missing_name(self):
+        with pytest.raises(ValidationError):
+            WebSocketEvent(type="COMPONENT_CREATED", data={"id": 1, "type": "service"})
+
 
 class TestRealtimeTelemetryStreaming:
     """Contract tests for websocket telemetry streaming sequence."""
@@ -447,3 +456,52 @@ class TestRealtimeTelemetryStreaming:
         assert attack_idx < end_idx
         assert defense_idx < end_idx
         assert convergence_idx < end_idx
+
+
+class TestWebSocketEndpointSequence:
+    """Endpoint-level websocket sequence tests."""
+
+    def test_websocket_endpoint_emits_system_init_then_mock_events(self, monkeypatch):
+        async def _fake_mock_stream(websocket, prompt):
+            await websocket.send_json({"type": "AGENT_SPAWN", "data": {"id": "a1", "name": "SecurityHawk", "type": "RED_TEAM"}})
+            await websocket.send_json({"type": "SIMULATION_END", "data": {"status": "STABLE"}})
+
+        monkeypatch.setattr("backend.src.server.send_mock_simulation", _fake_mock_stream)
+
+        with TestClient(app).websocket_connect("/ws/simulate") as ws:
+            ws.send_json({
+                "type": "START_SIMULATION",
+                "data": {"prompt": "Design API", "config": {}, "use_mock": True},
+            })
+
+            first = ws.receive_json()
+            second = ws.receive_json()
+            third = ws.receive_json()
+
+            assert first["type"] == "SYSTEM_INIT"
+            assert second["type"] == "AGENT_SPAWN"
+            assert third["type"] == "SIMULATION_END"
+
+    def test_websocket_endpoint_real_path_emits_telemetry_before_end(self, monkeypatch):
+        async def _fake_real_stream(websocket, prompt, config):
+            await websocket.send_json({"type": "ATTACK_EFFECTIVENESS_UPDATE", "data": []})
+            await websocket.send_json({"type": "DEFENSE_QUALITY_UPDATE", "data": {"regression_rate": 0.0}})
+            await websocket.send_json({"type": "CONVERGENCE_UPDATE", "data": {"iterations_to_stable": 1}})
+            await websocket.send_json({"type": "SIMULATION_END", "data": {"status": "STABLE"}})
+
+        monkeypatch.setattr("backend.src.server.run_real_simulation", _fake_real_stream)
+
+        with TestClient(app).websocket_connect("/ws/simulate") as ws:
+            ws.send_json({
+                "type": "START_SIMULATION",
+                "data": {"prompt": "Design API", "config": {}, "use_mock": False},
+            })
+
+            events = [ws.receive_json() for _ in range(5)]
+            event_types = [evt["type"] for evt in events]
+
+            assert event_types[0] == "SYSTEM_INIT"
+            assert "ATTACK_EFFECTIVENESS_UPDATE" in event_types
+            assert "DEFENSE_QUALITY_UPDATE" in event_types
+            assert "CONVERGENCE_UPDATE" in event_types
+            assert event_types.index("ATTACK_EFFECTIVENESS_UPDATE") < event_types.index("SIMULATION_END")

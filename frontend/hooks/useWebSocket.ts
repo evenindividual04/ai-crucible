@@ -21,6 +21,10 @@ function isObject(value: unknown): value is Record<string, any> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function hasRequiredKeys(value: Record<string, any>, keys: string[]): boolean {
+    return keys.every((key) => key in value);
+}
+
 function parseWebSocketEvent(raw: unknown): WebSocketEvent | null {
     if (!isObject(raw) || typeof raw.type !== 'string' || !('data' in raw)) {
         return null;
@@ -44,6 +48,26 @@ function parseWebSocketEvent(raw: unknown): WebSocketEvent | null {
     }
 
     if (!isObject(eventData)) {
+        return null;
+    }
+
+    const requiredByType: Record<string, string[]> = {
+        SYSTEM_INIT: ['prompt', 'config', 'timestamp'],
+        SIMULATION_END: ['status', 'iterations'],
+        ITERATION_START: ['iteration', 'max_iterations'],
+        AGENT_SPAWN: ['id', 'name', 'type'],
+        AGENT_THINKING: [],
+        COMPONENT_CREATED: ['id', 'name', 'type'],
+        COMPONENT_RISK_UPDATE: ['component_id', 'risk_level', 'vulnerability_count'],
+        VULNERABILITY_FOUND: ['id', 'severity', 'title'],
+        PATCH_APPLIED: ['id', 'target_vulnerability_id', 'description'],
+        SCORE_UPDATE: ['score'],
+        JUDGE_DECISION: ['decision', 'reason'],
+        ERROR: ['message'],
+    };
+
+    const required = requiredByType[eventType];
+    if (required && !hasRequiredKeys(eventData, required)) {
         return null;
     }
 
