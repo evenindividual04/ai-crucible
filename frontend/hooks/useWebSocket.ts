@@ -1,11 +1,53 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useCrucibleStore } from '@/store/crucibleStore';
 import { WebSocketEvent } from '@/types/events';
+import {
+    Component,
+    Vulnerability,
+    Agent,
+    ScoreData,
+    AttackEffectivenessSeries,
+    DefenseQualityData,
+    ConvergenceData,
+} from '@/types/events';
 
 interface UseWebSocketOptions {
     reconnectInterval?: number;
     maxReconnectAttempts?: number;
     heartbeatInterval?: number;
+}
+
+function isObject(value: unknown): value is Record<string, any> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseWebSocketEvent(raw: unknown): WebSocketEvent | null {
+    if (!isObject(raw) || typeof raw.type !== 'string' || !('data' in raw)) {
+        return null;
+    }
+
+    const eventType = raw.type;
+    const eventData = raw.data;
+
+    if (eventType === 'ATTACK_EFFECTIVENESS_UPDATE') {
+        if (!Array.isArray(eventData) || !eventData.every((entry) => isObject(entry))) {
+            return null;
+        }
+        return { type: eventType, data: eventData };
+    }
+
+    if (eventType === 'DEFENSE_QUALITY_UPDATE' || eventType === 'CONVERGENCE_UPDATE') {
+        if (!isObject(eventData)) {
+            return null;
+        }
+        return { type: eventType, data: eventData } as WebSocketEvent;
+    }
+
+    if (!isObject(eventData)) {
+        return null;
+    }
+
+    return { type: eventType as WebSocketEvent['type'], data: eventData } as WebSocketEvent;
 }
 
 export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
@@ -71,14 +113,18 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
 
         ws.current.onmessage = (event) => {
             try {
-                const message: WebSocketEvent = JSON.parse(event.data);
-
-                // Handle PONG response (if backend sends it)
-                if ((message.type as string) === 'PONG') {
+                const parsed = parseWebSocketEvent(JSON.parse(event.data));
+                if (!parsed) {
+                    console.warn('Dropped malformed WebSocket event payload');
                     return;
                 }
 
-                handleEvent(message);
+                // Handle PONG response (if backend sends it)
+                if ((parsed.type as string) === 'PONG') {
+                    return;
+                }
+
+                handleEvent(parsed);
             } catch (e) {
                 console.error('Failed to parse WebSocket message:', e);
             }
@@ -129,11 +175,11 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
                 break;
 
             case 'COMPONENT_CREATED':
-                store.addComponent(event.data);
+                store.addComponent(event.data as Component);
                 break;
 
             case 'VULNERABILITY_FOUND':
-                store.addVulnerability(event.data);
+                store.addVulnerability(event.data as Vulnerability);
                 break;
 
             case 'PATCH_APPLIED':
@@ -141,47 +187,50 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
                 break;
 
             case 'AGENT_SPAWN':
-                store.addAgent(event.data);
+                store.addAgent(event.data as Agent);
                 break;
 
             case 'COMPONENT_RISK_UPDATE':
                 store.updateComponentRisk(
-                    event.data.component_id,
-                    event.data.risk_level,
-                    event.data.vulnerability_count
+                    (event.data as Record<string, any>).component_id,
+                    (event.data as Record<string, any>).risk_level,
+                    (event.data as Record<string, any>).vulnerability_count
                 );
                 break;
 
             case 'SCORE_UPDATE':
-                store.updateScore(event.data);
+                store.updateScore(event.data as ScoreData);
                 break;
 
             case 'ATTACK_EFFECTIVENESS_UPDATE':
-                store.updateAttackEffectiveness(event.data);
+                store.updateAttackEffectiveness(event.data as AttackEffectivenessSeries);
                 break;
 
             case 'DEFENSE_QUALITY_UPDATE':
-                store.updateDefenseQuality(event.data);
+                store.updateDefenseQuality(event.data as DefenseQualityData);
                 break;
 
             case 'CONVERGENCE_UPDATE':
-                store.updateConvergenceData(event.data);
+                store.updateConvergenceData(event.data as ConvergenceData);
                 break;
 
             case 'ITERATION_START':
-                store.setIteration(event.data.iteration, event.data.max_iterations);
+                store.setIteration(
+                    (event.data as Record<string, any>).iteration,
+                    (event.data as Record<string, any>).max_iterations
+                );
                 break;
 
             case 'SIMULATION_END':
                 store.setSimulating(false);
                 if (event.data.attack_effectiveness !== undefined) {
-                    store.updateAttackEffectiveness(event.data.attack_effectiveness);
+                    store.updateAttackEffectiveness(event.data.attack_effectiveness as AttackEffectivenessSeries);
                 }
                 if (event.data.defense_quality !== undefined) {
-                    store.updateDefenseQuality(event.data.defense_quality);
+                    store.updateDefenseQuality(event.data.defense_quality as DefenseQualityData);
                 }
                 if (event.data.convergence_metrics !== undefined) {
-                    store.updateConvergenceData(event.data.convergence_metrics);
+                    store.updateConvergenceData(event.data.convergence_metrics as ConvergenceData);
                 }
                 store.addRunToHistory({
                     id: event.data.run_id || `run-${Date.now()}`,

@@ -19,10 +19,50 @@ export type EventType =
   | 'JUDGE_DECISION'
   | 'ERROR';
 
-export interface WebSocketEvent {
-  type: EventType;
-  data: any;
+export interface AttackEffectivenessData {
+  [key: string]: any;
 }
+
+export type AttackEffectivenessSeries = AttackEffectivenessData[];
+
+export interface DefenseQualityData {
+  [key: string]: any;
+}
+
+export interface ConvergenceData {
+  [key: string]: any;
+}
+
+type GenericEventType = Exclude<
+  EventType,
+  'ATTACK_EFFECTIVENESS_UPDATE' | 'DEFENSE_QUALITY_UPDATE' | 'CONVERGENCE_UPDATE'
+>;
+
+export interface GenericWebSocketEvent {
+  type: GenericEventType;
+  data: Record<string, any>;
+}
+
+export interface AttackEffectivenessEvent {
+  type: 'ATTACK_EFFECTIVENESS_UPDATE';
+  data: AttackEffectivenessSeries;
+}
+
+export interface DefenseQualityEvent {
+  type: 'DEFENSE_QUALITY_UPDATE';
+  data: DefenseQualityData;
+}
+
+export interface ConvergenceEvent {
+  type: 'CONVERGENCE_UPDATE';
+  data: ConvergenceData;
+}
+
+export type WebSocketEvent =
+  | GenericWebSocketEvent
+  | AttackEffectivenessEvent
+  | DefenseQualityEvent
+  | ConvergenceEvent;
 
 export interface Component {
   id: number;
@@ -63,18 +103,4 @@ export interface ScoreData {
     medium: number;
     low: number;
   };
-}
-
-export interface AttackEffectivenessData {
-  [key: string]: any;
-}
-
-export type AttackEffectivenessSeries = AttackEffectivenessData[];
-
-export interface DefenseQualityData {
-  [key: string]: any;
-}
-
-export interface ConvergenceData {
-  [key: string]: any;
 }

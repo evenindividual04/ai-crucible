@@ -438,6 +438,12 @@ pytest tests/test_integration.py tests/test_graph_tracing.py -v
 
 # Coverage report
 pytest --cov=crucible --cov-report=html
+
+# One-command verification loop (Python + frontend build)
+./scripts/verify.sh
+
+# Equivalent via Makefile
+make verify
 ```
 
 ### Project Structure

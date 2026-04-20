@@ -660,11 +660,13 @@ def resume(
     output_dir: Path = typer.Option(
         Path("outputs"), "--output-dir", "-o",
         help="Directory containing run outputs"
+    ),
+    config_file: Optional[Path] = typer.Option(
+        None, "--config", "-c",
+        help="Path to configuration file"
     )
 ):
     """Resume an interrupted run from a checkpoint."""
-    from crucible.checkpoint import CheckpointManager
-    
     # Load checkpoint
     checkpoint_mgr = CheckpointManager(run_id=run_id, output_dir=output_dir)
     
@@ -675,16 +677,50 @@ def resume(
         console.print(f"Vulnerabilities: {len(state.vulnerabilities)}")
         console.print(f"Patches: {len(state.patches)}")
         console.print()
-        
-        # TODO: Resume execution from loaded state
-        # This would require refactoring _run_with_display to accept initial state
-        console.print("[yellow]Note: Full resume execution not yet implemented[/yellow]")
-        console.print("[dim]For now, this command loads and displays the checkpoint data[/dim]")
+
+        # Build a config for resumed execution while preserving loaded state.
+        config = CrucibleConfig.load(
+            config_path=config_file,
+            overrides={
+                "max_iterations": max(state.max_iterations, state.iteration_count + 1),
+                "output": {"mode": "war_room"},
+            },
+        )
+        set_config(config)
+
+        display = CrucibleDisplay(mode=config.output.mode, console=console)
+
+        final_state = asyncio.run(_resume_with_display(state, config, display))
+
+        display.print_completion_celebration(final_state)
+        display.print_termination(final_state)
+        display.print_summary_table(final_state)
+
+        exit_code = {
+            "STABLE": 0,
+            "UNRESOLVED": 1,
+            "FAILED": 2,
+        }.get(final_state.status, 2)
+
+        raise typer.Exit(exit_code)
         
     except FileNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
         console.print(f"\nUse [cyan]crucible list-runs[/cyan] to see available runs")
         raise typer.Exit(1)
+    except (KeyboardInterrupt, SystemExit):
+        console.print("\n[yellow]Interrupted by user[/yellow]")
+        raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except RuntimeError as e:
+        if str(e) == "Event loop is closed":
+            return
+        console.print(f"[red]Resume failed:[/red] {e}")
+        raise typer.Exit(2)
+    except Exception as e:
+        console.print(f"[red]Resume failed:[/red] {e}")
+        raise typer.Exit(2)
 
 
 @app.command()

@@ -6,6 +6,7 @@ Tests the full pipeline with mocked LLM responses.
 
 import pytest
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 from pydantic import ValidationError
@@ -19,6 +20,7 @@ from crucible.judge.controller import JudgeController
 from crucible.judge.novelty import NoveltyChecker
 from crucible.router.keyword_router import KeywordRouter, route_agents
 from backend.src.models import WebSocketEvent
+from backend.src.server import run_real_simulation
 
 
 # Mock LLM responses
@@ -356,15 +358,15 @@ class TestDashboardTelemetryEvents:
     """Contract tests for optional dashboard telemetry event types."""
 
     @pytest.mark.parametrize(
-        "event_type",
+        ("event_type", "payload"),
         [
-            "ATTACK_EFFECTIVENESS_UPDATE",
-            "DEFENSE_QUALITY_UPDATE",
-            "CONVERGENCE_UPDATE",
+            ("ATTACK_EFFECTIVENESS_UPDATE", [{"agent": "SecurityHawk", "effectiveness_ratio": 0.8}]),
+            ("DEFENSE_QUALITY_UPDATE", {"first_time_fix_rate": 0.7}),
+            ("CONVERGENCE_UPDATE", {"iterations_to_stable": 2}),
         ],
     )
-    def test_websocket_event_accepts_optional_telemetry_types(self, event_type):
-        evt = WebSocketEvent(type=event_type, data={"ok": True})
+    def test_websocket_event_accepts_optional_telemetry_types(self, event_type, payload):
+        evt = WebSocketEvent(type=event_type, data=payload)
         assert evt.type == event_type
 
     def test_websocket_event_rejects_unknown_type(self):
@@ -381,3 +383,67 @@ class TestDashboardTelemetryEvents:
         )
         assert isinstance(evt.data, list)
         assert evt.data[0]["agent"] == "SecurityHawk"
+
+    def test_websocket_event_rejects_attack_effectiveness_dict_payload(self):
+        with pytest.raises(ValidationError):
+            WebSocketEvent(
+                type="ATTACK_EFFECTIVENESS_UPDATE",
+                data={"agent": "SecurityHawk", "effectiveness_ratio": 0.8},
+            )
+
+    def test_websocket_event_rejects_defense_quality_list_payload(self):
+        with pytest.raises(ValidationError):
+            WebSocketEvent(
+                type="DEFENSE_QUALITY_UPDATE",
+                data=[{"first_time_fix_rate": 0.5}],
+            )
+
+
+class TestRealtimeTelemetryStreaming:
+    """Contract tests for websocket telemetry streaming sequence."""
+
+    @pytest.mark.asyncio
+    async def test_run_real_simulation_emits_telemetry_before_simulation_end(self, monkeypatch):
+        class FakeWebSocket:
+            def __init__(self):
+                self.events = []
+
+            async def send_json(self, payload):
+                self.events.append(payload)
+
+        fake_state = SimpleNamespace(
+            design_components=[],
+            iteration_summaries=[],
+            max_iterations=1,
+            active_agents=[],
+            vulnerabilities=[],
+            patches=[],
+            security_scores=[],
+            status="STABLE",
+            termination_reason="done",
+            iteration_count=1,
+            current_security_score=95,
+            attack_effectiveness=[],
+            defense_quality={"regression_rate": 0.0},
+            convergence_metrics={"iterations_to_stable": 1},
+        )
+
+        monkeypatch.setattr("crucible.graph.run_crucible", lambda _prompt: fake_state)
+
+        ws = FakeWebSocket()
+        await run_real_simulation(ws, "Design a system", {})
+
+        event_types = [evt["type"] for evt in ws.events]
+        assert "ATTACK_EFFECTIVENESS_UPDATE" in event_types
+        assert "DEFENSE_QUALITY_UPDATE" in event_types
+        assert "CONVERGENCE_UPDATE" in event_types
+        assert "SIMULATION_END" in event_types
+
+        attack_idx = event_types.index("ATTACK_EFFECTIVENESS_UPDATE")
+        defense_idx = event_types.index("DEFENSE_QUALITY_UPDATE")
+        convergence_idx = event_types.index("CONVERGENCE_UPDATE")
+        end_idx = event_types.index("SIMULATION_END")
+
+        assert attack_idx < end_idx
+        assert defense_idx < end_idx
+        assert convergence_idx < end_idx
