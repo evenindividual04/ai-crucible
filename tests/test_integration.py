@@ -22,6 +22,9 @@ from crucible.judge.novelty import NoveltyChecker
 from crucible.router.keyword_router import KeywordRouter, route_agents
 from backend.src.models import WebSocketEvent
 from backend.src.server import app, run_real_simulation
+from sqlmodel import select
+
+from backend.src.database import get_run, get_session, RunRecord
 
 
 # Mock LLM responses
@@ -489,9 +492,11 @@ class TestWebSocketEndpointSequence:
             await websocket.send_json({"type": "CONVERGENCE_UPDATE", "data": {"iterations_to_stable": 1}})
             await websocket.send_json({"type": "SIMULATION_END", "data": {"status": "STABLE"}})
 
+        monkeypatch.setenv("CRUCIBLE_ENABLE_LIVE_RUNS", "true")
+        monkeypatch.setenv("CRUCIBLE_API_KEY", "test-key")
         monkeypatch.setattr("backend.src.server.run_real_simulation", _fake_real_stream)
 
-        with TestClient(app).websocket_connect("/ws/simulate") as ws:
+        with TestClient(app).websocket_connect("/ws/simulate", headers={"x-api-key": "test-key"}) as ws:
             ws.send_json({
                 "type": "START_SIMULATION",
                 "data": {"prompt": "Design API", "config": {}, "use_mock": False},
@@ -505,3 +510,103 @@ class TestWebSocketEndpointSequence:
             assert "DEFENSE_QUALITY_UPDATE" in event_types
             assert "CONVERGENCE_UPDATE" in event_types
             assert event_types.index("ATTACK_EFFECTIVENESS_UPDATE") < event_types.index("SIMULATION_END")
+
+
+class TestRunApi:
+    """Tests for asynchronous run API and demo persistence path."""
+
+    def test_create_demo_run_and_fetch_events(self):
+        with TestClient(app) as client:
+            create_resp = client.post(
+                "/runs",
+                json={
+                    "prompt": "Design payments architecture",
+                    "mode": "demo",
+                    "demo_id": "payments-gateway",
+                },
+            )
+            assert create_resp.status_code == 200
+            payload = create_resp.json()
+            assert payload["status"] == "completed"
+            run_id = payload["run_id"]
+
+            status_resp = client.get(f"/runs/{run_id}")
+            assert status_resp.status_code == 200
+            status_payload = status_resp.json()
+            assert status_payload["status"] == "completed"
+            assert status_payload["mode"] == "demo"
+
+            events_resp = client.get(f"/runs/{run_id}/events")
+            assert events_resp.status_code == 200
+            events_payload = events_resp.json()
+            assert events_payload["run_id"] == run_id
+            assert len(events_payload["events"]) > 0
+            assert events_payload["events"][-1]["type"] == "SIMULATION_END"
+
+    def test_create_demo_run_with_invalid_demo_id_returns_404(self):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/runs",
+                json={
+                    "prompt": "Design payments architecture",
+                    "mode": "demo",
+                    "demo_id": "does-not-exist",
+                },
+            )
+            assert resp.status_code == 404
+
+    def test_create_live_run_enqueue_failure_marks_run_failed(self, monkeypatch):
+        def _raise_enqueue(*args, **kwargs):
+            raise RuntimeError("queue down")
+
+        monkeypatch.setenv("CRUCIBLE_ENABLE_LIVE_RUNS", "true")
+        monkeypatch.setenv("CRUCIBLE_API_KEY", "test-key")
+        monkeypatch.setattr("backend.src.server.run_simulation_task.delay", _raise_enqueue)
+
+        with TestClient(app) as client:
+            resp = client.post(
+                "/runs",
+                json={
+                    "prompt": "Design payments architecture",
+                    "mode": "live",
+                },
+                headers={"x-api-key": "test-key"},
+            )
+            assert resp.status_code == 503
+
+        with get_session() as session:
+            run = session.exec(
+                select(RunRecord)
+                .where(RunRecord.prompt == "Design payments architecture")
+                .where(RunRecord.mode == "live")
+                .order_by(RunRecord.created_at.desc())
+            ).first()
+
+        assert run is not None
+        assert run.status == "failed"
+        assert run.error == "enqueue_failed"
+
+    def test_get_unknown_run_returns_404(self):
+        with TestClient(app) as client:
+            resp = client.get("/runs/run_missing")
+            assert resp.status_code == 404
+
+    def test_get_unknown_run_events_returns_404(self):
+        with TestClient(app) as client:
+            resp = client.get("/runs/run_missing/events")
+            assert resp.status_code == 404
+
+    def test_run_events_limit_is_bounded(self):
+        with TestClient(app) as client:
+            create_resp = client.post(
+                "/runs",
+                json={
+                    "prompt": "Design payments architecture",
+                    "mode": "demo",
+                    "demo_id": "payments-gateway",
+                },
+            )
+            run_id = create_resp.json()["run_id"]
+
+            resp = client.get(f"/runs/{run_id}/events?limit=1001")
+            assert resp.status_code == 422

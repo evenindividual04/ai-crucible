@@ -5,6 +5,10 @@ Provides real-time streaming of Crucible simulation events to frontend.
 """
 
 import sys
+import json
+import uuid
+import os
+import time
 from pathlib import Path
 
 # Add the main package source to path so the backend venv can import crucible
@@ -15,18 +19,33 @@ sys.path.insert(0, str(_repo_root / "src"))
 from dotenv import load_dotenv
 load_dotenv(_repo_root / ".env")
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, Literal
 import asyncio
 import logging
 
 # Import mock server for development
 from .mock_server import send_mock_simulation
+from .database import (
+    create_db_and_tables,
+    get_run,
+    get_session,
+    list_run_events,
+    RunRecord,
+    RunEventRecord,
+)
+from .demo_runs import DEMO_RUNS, list_demo_runs
+from .queue import redis_client
+from .tasks import run_simulation_task
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+_CREATE_RUN_WINDOW_SECONDS = 60
+_CREATE_RUN_MAX_REQUESTS = 20
+_create_run_timestamps: dict[str, list[float]] = {}
 
 app = FastAPI(
     title="AI Crucible API",
@@ -55,6 +74,80 @@ class SimulationRequest(BaseModel):
     use_mock: bool = True  # Use mock data by default for development
 
 
+class CreateRunRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=4000)
+    config: Optional[Dict[str, Any]] = None
+    mode: Literal["live", "demo"] = "live"
+    demo_id: Optional[str] = None
+
+
+class RunSummaryResponse(BaseModel):
+    run_id: str
+    status: str
+    mode: str
+    task_id: Optional[str] = None
+
+
+def _enforce_live_run_access(http_request: Request) -> None:
+    live_enabled = os.getenv("CRUCIBLE_ENABLE_LIVE_RUNS", "true").lower() == "true"
+    if not live_enabled:
+        raise HTTPException(status_code=403, detail="Live runs are disabled")
+
+    expected_api_key = os.getenv("CRUCIBLE_API_KEY")
+    if not expected_api_key:
+        raise HTTPException(status_code=503, detail="Live runs are not configured")
+
+    provided_api_key = http_request.headers.get("x-api-key", "")
+    if provided_api_key != expected_api_key:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _enforce_websocket_access(websocket: WebSocket) -> None:
+    expected_api_key = os.getenv("CRUCIBLE_API_KEY")
+    if expected_api_key:
+        provided_api_key = websocket.headers.get("x-api-key", "")
+        if provided_api_key != expected_api_key:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _enforce_live_run_websocket_access(websocket: WebSocket) -> None:
+    live_enabled = os.getenv("CRUCIBLE_ENABLE_LIVE_RUNS", "true").lower() == "true"
+    if not live_enabled:
+        raise HTTPException(status_code=403, detail="Live runs are disabled")
+    _enforce_websocket_access(websocket)
+
+
+def _enforce_live_run_read_access(http_request: Request, run: RunRecord) -> None:
+    if run.mode != "live":
+        return
+
+    expected_api_key = os.getenv("CRUCIBLE_API_KEY")
+    if not expected_api_key:
+        raise HTTPException(status_code=503, detail="Live runs are not configured")
+
+    provided_api_key = http_request.headers.get("x-api-key", "")
+    if provided_api_key != expected_api_key:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _enforce_create_run_rate_limit(http_request: Request) -> None:
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    now = time.time()
+    window_start = now - _CREATE_RUN_WINDOW_SECONDS
+
+    recent = [ts for ts in _create_run_timestamps.get(client_ip, []) if ts >= window_start]
+    if len(recent) >= _CREATE_RUN_MAX_REQUESTS:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    recent.append(now)
+    _create_run_timestamps[client_ip] = recent
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    create_db_and_tables()
+
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
@@ -73,6 +166,177 @@ async def health():
         "websocket": "ready",
         "timestamp": asyncio.get_event_loop().time()
     }
+
+
+@app.get("/demo-runs")
+async def demo_runs() -> dict[str, Any]:
+    return {"items": list_demo_runs()}
+
+
+@app.post("/runs", response_model=RunSummaryResponse)
+async def create_run(request: CreateRunRequest, http_request: Request) -> RunSummaryResponse:
+    _enforce_create_run_rate_limit(http_request)
+
+    demo = None
+    if request.mode == "demo":
+        demo_id = request.demo_id or "payments-gateway"
+        demo = DEMO_RUNS.get(demo_id)
+        if not demo:
+            raise HTTPException(status_code=404, detail=f"Unknown demo_id: {demo_id}")
+    else:
+        _enforce_live_run_access(http_request)
+
+    run_id = f"run_{uuid.uuid4().hex[:12]}"
+
+    with get_session() as session:
+        run = RunRecord(
+            id=run_id,
+            prompt=request.prompt,
+            mode=request.mode,
+            status="queued",
+        )
+        session.add(run)
+        session.commit()
+
+    if request.mode == "demo" and demo is not None:
+        with get_session() as session:
+            run = session.get(RunRecord, run_id)
+            if run:
+                run.status = "completed"
+                run.summary_json = demo["events"][-1]["data"]
+                run.score = float(demo["events"][-1]["data"].get("security_score", 0))
+                session.add(run)
+
+            for event in demo["events"]:
+                session.add(
+                    RunEventRecord(
+                        run_id=run_id,
+                        event_type=event["type"],
+                        payload_json=event["data"],
+                    )
+                )
+            session.commit()
+
+        return RunSummaryResponse(run_id=run_id, status="completed", mode="demo")
+
+    try:
+        task = run_simulation_task.delay(run_id=run_id, prompt=request.prompt, config=request.config or {})
+    except Exception as exc:
+        logger.exception("Failed to enqueue run %s", run_id)
+        with get_session() as session:
+            run = session.get(RunRecord, run_id)
+            if run:
+                run.status = "failed"
+                run.error = "enqueue_failed"
+                session.add(run)
+                session.commit()
+        raise HTTPException(status_code=503, detail="Simulation queue unavailable") from exc
+
+    return RunSummaryResponse(run_id=run_id, status="queued", mode="live", task_id=task.id)
+
+
+@app.get("/runs/{run_id}")
+async def get_run_status(run_id: str, http_request: Request) -> dict[str, Any]:
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run_not_found")
+    _enforce_live_run_read_access(http_request, run)
+
+    return {
+        "run_id": run.id,
+        "status": run.status,
+        "mode": run.mode,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "score": run.score,
+        "grade": run.grade,
+        "summary": run.summary_json,
+        "error": run.error,
+    }
+
+
+@app.get("/runs/{run_id}/events")
+async def get_run_events(
+    run_id: str,
+    http_request: Request,
+    limit: int = Query(default=200, ge=1, le=1000),
+) -> dict[str, Any]:
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run_not_found")
+    _enforce_live_run_read_access(http_request, run)
+
+    events = list_run_events(run_id, limit=limit)
+    return {
+        "run_id": run_id,
+        "events": [
+            {
+                "id": event.id,
+                "type": event.event_type,
+                "data": event.payload_json,
+                "created_at": event.created_at,
+            }
+            for event in events
+        ],
+    }
+
+
+async def _stream_run_subscription(websocket: WebSocket, run_id: str) -> None:
+    # Replay persisted events so reconnecting or late subscribers get full context.
+    replay_events = list_run_events(run_id, limit=1000)
+    run = get_run(run_id)
+
+    if not replay_events and run is None:
+        await websocket.send_json({"type": "ERROR", "data": {"message": "run_not_found"}})
+        return
+
+    for event in replay_events:
+        await websocket.send_json({"type": event.event_type, "data": event.payload_json})
+
+    if replay_events and replay_events[-1].event_type in ("SIMULATION_END", "ERROR"):
+        return
+
+    if run and run.status in ("completed", "failed"):
+        await websocket.send_json({"type": "RUN_STATUS", "data": {"status": run.status}})
+        return
+
+    channel = f"run:{run_id}:events"
+    try:
+        client = redis_client()
+        pubsub = client.pubsub()
+        pubsub.subscribe(channel)
+    except Exception:
+        logger.exception("Redis subscription unavailable for run %s", run_id)
+        return
+
+    idle_ticks = 0
+    try:
+        while True:
+            message = await asyncio.to_thread(
+                pubsub.get_message,
+                ignore_subscribe_messages=True,
+                timeout=1.0,
+            )
+
+            if message and message.get("data"):
+                payload = json.loads(message["data"])
+                await websocket.send_json(payload)
+                idle_ticks = 0
+                if payload.get("type") in ("SIMULATION_END", "ERROR"):
+                    return
+                continue
+
+            idle_ticks += 1
+            run = get_run(run_id)
+            if run and run.status in ("completed", "failed") and idle_ticks >= 2:
+                await websocket.send_json({"type": "RUN_STATUS", "data": {"status": run.status}})
+                return
+            if idle_ticks >= 300:
+                return
+    finally:
+        pubsub.unsubscribe(channel)
+        pubsub.close()
 
 
 async def run_real_simulation(websocket: WebSocket, prompt: str, config: Dict[str, Any]) -> None:
@@ -232,6 +496,18 @@ async def websocket_endpoint(websocket: WebSocket):
         # Wait for start message from client
         data = await websocket.receive_json()
         
+        if data.get("type") == "SUBSCRIBE_RUN":
+            _enforce_websocket_access(websocket)
+            run_id = data.get("data", {}).get("run_id", "")
+            if not run_id:
+                await websocket.send_json({
+                    "type": "ERROR",
+                    "data": {"message": "Missing run_id for SUBSCRIBE_RUN"},
+                })
+                return
+            await _stream_run_subscription(websocket, run_id)
+            return
+
         if data.get("type") != "START_SIMULATION":
             await websocket.send_json({
                 "type": "ERROR",
@@ -242,6 +518,10 @@ async def websocket_endpoint(websocket: WebSocket):
         prompt = data.get("data", {}).get("prompt", "")
         config = data.get("data", {}).get("config", {})
         use_mock = data.get("data", {}).get("use_mock", True)
+        demo_id = data.get("data", {}).get("demo_id")
+
+        if not use_mock:
+            _enforce_live_run_websocket_access(websocket)
         
         logger.info(f"Starting simulation: prompt='{prompt[:50]}...', mock={use_mock}")
         
@@ -256,8 +536,13 @@ async def websocket_endpoint(websocket: WebSocket):
         })
         
         if use_mock:
-            # Use mock data for development
-            await send_mock_simulation(websocket, prompt)
+            if demo_id and demo_id in DEMO_RUNS:
+                for event in DEMO_RUNS[demo_id]["events"]:
+                    await websocket.send_json(event)
+                    await asyncio.sleep(0.2)
+            else:
+                # Use mock data for development
+                await send_mock_simulation(websocket, prompt)
         else:
             await run_real_simulation(websocket, prompt, config or {})
         
